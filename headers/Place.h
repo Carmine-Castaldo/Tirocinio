@@ -18,7 +18,7 @@ public:
     static BT::PortsList providedPorts();
 
     bool checkReleaser() override;
-    void updateClockPeriod() override;
+    void updatePerceptualSchema() override;
     std::pair<double, double> executeMotorSchema() override;
 };
 

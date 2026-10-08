@@ -5,16 +5,29 @@
 #include "RemoteAPIObjects.h"
 #include <string>
 
-class IsColorReached : public BT::SimpleConditionNode {
+class IsColorReached : public BT::ConditionNode {
+private:
+    RemoteAPIObjects* sim_;
+
 public:
-    IsColorReached(const std::string& name, const BT::NodeConfig& config);
+    IsColorReached(const std::string& name, const BT::NodeConfig& config, RemoteAPIObjects* sim_);
+
     static BT::PortsList providedPorts();
+
+    BT::NodeStatus tick() override;
 };
 
-class IsObjectInKnapsack : public BT::SimpleConditionNode {
+
+class IsObjectInKnapsack : public BT::ConditionNode {
+private:
+    RemoteAPIObjects* sim_;
+
 public:
-    IsObjectInKnapsack(const std::string& name, const BT::NodeConfig& config);
+    IsObjectInKnapsack(const std::string& name, const BT::NodeConfig& config, RemoteAPIObjects* sim_);
+
     static BT::PortsList providedPorts();
+
+    BT::NodeStatus tick() override;
 };
 
 #endif // CONDITIONS_H

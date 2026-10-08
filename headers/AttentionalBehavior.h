@@ -20,11 +20,11 @@ public:
         : BT::ActionNodeBase(name, config) {}
 
     static BT::PortsList providedPorts() {
-        return { BT::InputPort<double>("mu", 1.0, "Peso task top-down mu_b") };
+        return { BT::InputPort<double>("mu", 1.0, "Top-Down Regulation mu_b") };
     }
 
     virtual bool checkReleaser() = 0;
-    virtual void updateClockPeriod() = 0;
+    virtual void updatePerceptualSchema() = 0;
     virtual std::pair<double, double> executeMotorSchema() = 0;
 
     BT::NodeStatus tick() override {
@@ -35,7 +35,7 @@ public:
             return BT::NodeStatus::FAILURE;
         }
 
-        updateClockPeriod();
+        updatePerceptualSchema();
 
         if (lambda_ <= 1e-5) lambda_ = 1e-5;
         emphasis_ = mu_ / lambda_;

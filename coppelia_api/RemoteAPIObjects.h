@@ -4603,6 +4603,25 @@ public:
     RemoteAPIObjects(RemoteAPIClient *client);
     RemoteAPIObject::sim sim();
     RemoteAPIObject::simIK simIK();
+    std::vector<double> getObjectPosition(const std::string& objectPath) {
+        int64_t handle = this->sim().getObjectHandle(objectPath);
+        return this->sim().getObjectPosition(handle, -1);
+    }
+
+        
+    std::vector<double> getRobotPosition() {
+        return getObjectPosition("/PioneerP3DX");
+    }
+
+    double getDistanceTo(const std::string& objectPath) {
+        auto robotPos = getRobotPosition();
+        auto targetPos = getObjectPosition(objectPath);
+
+        double dx = targetPos[0] - robotPos[0];
+        double dy = targetPos[1] - robotPos[1];
+        return std::sqrt(dx * dx + dy * dy);
+     }
+     
 private:
     RemoteAPIClient *client;
 };

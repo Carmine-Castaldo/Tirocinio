@@ -1,0 +1,15 @@
+cat << 'EOF' > .gitignore
+
+build/
+bin/
+*.o
+*.so
+*.a
+
+.vscode/
+.idea/
+*.swp
+
+.DS_Store
+EOF
+

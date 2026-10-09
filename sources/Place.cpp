@@ -1,0 +1,87 @@
+#include "Place.h"
+
+Place::Place(const std::string& name, const BT::NodeConfig& config, RemoteAPIObjects* sim)
+    : AttentionalBehavior(name, config), sim_(sim) {}
+
+BT::PortsList Place::providedPorts(){
+    BT::PortsList ports = {
+        BT::InputPort<std::string>("Obj"),
+        BT::InputPort<std::string>("Color"),
+        BT::InputPort<std::string>("Target"),
+        BT::BidirectionalPort<std::vector<int>>("Knapsack")
+    };
+    auto basePorts = AttentionalBehavior::providedPorts();
+    ports.insert(basePorts.begin(), basePorts.end());
+    return ports;
+}
+
+bool Place::checkInternalReleaser(){
+    if (targetHandle_ == -1) return false;
+    bool inKnapsack = (std::find(knapsack.begin(), knapsack.end(), static_cast<int>(targetHandle_)) != knapsack.end());
+    if (target_ == "ground")
+        return inKnapsack;
+    else
+        return (knapsack.size() < 4 && !inKnapsack);
+    
+}
+
+bool Place::checkExternalReleaser(){
+    
+    if(target_ == "ground") distance = sim_->getDistanceTo("/Bill");
+    else distance = sim_->getDistanceTo(objectPath_);
+
+    return (distance < 0.6);
+}
+
+void Place::updatePerceptualSchema() {
+    lambda_ = 1.0;
+    getInput("Target", target_);
+    getInput("Obj", objectPath_);
+    getInput("Knapsack", knapsack);
+    if (!objectPath_.empty())
+        targetHandle_ = sim_->sim().getObjectHandle(objectPath_);
+    
+    std::cout << "[Place] Target:" << target_ << " ObjectPath: " << objectPath_ << std::endl;
+}
+
+std::pair<double, double> Place::executeMotorSchema() {
+    std::cout << "Place executemotorschema" << target_ << std::endl;
+    if (target_ == "knapsack") {
+        std::cout << "debug in knapsack" << std::endl;
+        size_t n = knapsack.size();
+        std::string connectionPath = "/PioneerP3DX/connection[" + std::to_string(n) + "]";
+        
+        try {
+            int64_t connHandle = sim_->sim().getObjectHandle(connectionPath);
+            sim_->sim().setObjectInt32Param(targetHandle_, sim_->sim().shapeintparam_static, 1);
+            sim_->sim().setObjectInt32Param(targetHandle_, sim_->sim().shapeintparam_respondable, 0);
+            sim_->sim().resetDynamicObject(targetHandle_);
+            sim_->sim().setObjectParent(targetHandle_, connHandle, false);
+            sim_->sim().setObjectPosition(targetHandle_, connHandle, {0.0, 0.0, 0.05});
+
+            if (std::find(knapsack.begin(), knapsack.end(), static_cast<int>(targetHandle_)) == knapsack.end())
+                knapsack.push_back(static_cast<int>(targetHandle_));
+            
+
+            setOutput("Knapsack", knapsack);
+        } catch (...) {}
+    } else if (target_ == "ground") {
+        sim_->sim().setObjectParent(targetHandle_, -1, true);
+        auto robotPos = sim_->getRobotPosition();
+        std::vector<double> groundPos = {robotPos[0] + 0.4, robotPos[1] + 0.3, 0.05};
+        sim_->sim().setObjectPosition(targetHandle_, -1, groundPos);
+        sim_->sim().setObjectInt32Param(targetHandle_, sim_->sim().shapeintparam_static, 0);
+        sim_->sim().setObjectInt32Param(targetHandle_, sim_->sim().shapeintparam_respondable, 1);
+        sim_->sim().resetDynamicObject(targetHandle_);
+
+        auto it = std::find(knapsack.begin(), knapsack.end(), static_cast<int>(targetHandle_));
+        if (it != knapsack.end()) {
+            knapsack.erase(it);
+        }
+
+        setOutput("Knapsack", knapsack);
+    }
+
+    return {0.0, 0.0};
+}
+

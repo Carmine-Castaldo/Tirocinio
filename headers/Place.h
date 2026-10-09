@@ -4,22 +4,27 @@
 #include "AttentionalBehavior.h"
 #include "RemoteAPIObjects.h"
 #include <string>
+#include <vector>
 
 class Place : public AttentionalBehavior {
 private:
-    RemoteAPIObjects* simObj_;
+    RemoteAPIObjects* sim_;
     std::string objectPath_;
     std::string target_;
-    bool isPlaced_ = false;
+    std::vector<int> knapsack;
+    int64_t targetHandle_ = -1;
+    double distance = 999.0;
 
 public:
-    Place(const std::string& name, const BT::NodeConfig& config, RemoteAPIObjects* simObj);
+    Place(const std::string& name, const BT::NodeConfig& config, RemoteAPIObjects* sim_);
 
     static BT::PortsList providedPorts();
 
-    bool checkReleaser() override;
+    bool checkInternalReleaser() override;
+    bool checkExternalReleaser() override;
     void updatePerceptualSchema() override;
     std::pair<double, double> executeMotorSchema() override;
+
 };
 
 #endif // PLACE_H

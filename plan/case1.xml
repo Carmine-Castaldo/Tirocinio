@@ -1,0 +1,80 @@
+<root BTCPP_format="4" main_tree_to_execute="MainTree">
+
+    <BehaviorTree ID="MainTree">
+        <Parallel failure_count="1" success_count="2">
+            <SubTree ID="Task1" />
+            <SubTree ID="Task2" />
+        </Parallel>
+    </BehaviorTree>
+
+    <BehaviorTree ID="Task1">
+        <Parallel failure_count="4" success_count="4">
+            <SubTree ID="Take"   Obj="/YellowCube" Color="Yellow" X="2.0" Y="2.0" knapsack="{knapsack}"/>
+            <SubTree ID="Take"   Obj="/OrangeCube" Color="Orange" X="-2.0" Y="2.0" knapsack="{knapsack}"/>
+            <SubTree ID="Return" Obj="/YellowCube" Color="Yellow" X="0.0" Y="0.0" knapsack="{knapsack}"/>
+            <SubTree ID="Return" Obj="/OrangeCube" Color="Orange" X="0.0" Y="0.0" knapsack="{knapsack}"/>
+        </Parallel>
+    </BehaviorTree>
+
+    <BehaviorTree ID="Task2">
+        <Parallel failure_count="4" success_count="4">
+            <SubTree ID="Take"   Obj="/GreenCube" Color="Green" X="3.0" Y="-3.0" knapsack="{knapsack}" />
+            <SubTree ID="Take"   Obj="/RedCube"   Color="Red"   X="-3.0" Y="-3.0" knapsack="{knapsack}" />
+            <SubTree ID="Return" Obj="/GreenCube" Color="Green" X="0.0" Y="0.0" knapsack="{knapsack}" />
+            <SubTree ID="Return" Obj="/RedCube"   Color="Red"   X="0.0" Y="0.0" knapsack="{knapsack}" />
+        </Parallel>
+    </BehaviorTree>
+
+    <BehaviorTree ID="Take">
+        <Sequence>
+            <SubTree ID="GoToColor" Obj="{Obj}" Color="{Color}" X="{X}" Y="{Y}" knapsack="{knapsack}" Return="false"/>
+            <SubTree ID="PickUp"    Obj="{Obj}" Color="{Color}" knapsack="{knapsack}" />
+        </Sequence>
+    </BehaviorTree>
+
+    <BehaviorTree ID="Return">
+        <Sequence>
+            <SubTree ID="GoToObject" Obj="/Bill" Color="{Color}" X="{X}" Y="{Y}" knapsack="{knapsack}" Return="true" />
+            <SubTree ID="PutDown"    Obj="{Obj}" Color="{Color}" knapsack="{knapsack}"/>
+        </Sequence>
+    </BehaviorTree>
+
+    <BehaviorTree ID="GoToColor">
+        <SubTree ID="GoToObject" Obj="{Obj}" Color="{Color}" X="{X}" Y="{Y}" knapsack="{knapsack}" Return="{Return}"/>
+    </BehaviorTree>
+
+    <BehaviorTree ID="GoToObject">
+        <ReactiveFallback>
+            <SubTree ID="FollowColor" Color="{Color}" ObjectPath="{Obj}" knapsack="{knapsack}" Return="{Return}" />
+            <SubTree ID="ExploreXY" X="{X}" Y="{Y}" target_id="{Obj}" />
+        </ReactiveFallback>
+    </BehaviorTree>
+
+    <BehaviorTree ID="FollowColor">
+        <Parallel failure_count="2" success_count="1">    
+            <AvoidObstacles name="avoid" ObjectPath="{ObjectPath}" />
+            <ReachColor name="reachColor" Color="{Color}" ObjectPath="{ObjectPath}" Knapsack="{knapsack}" Return="{Return}"/>
+        </Parallel>
+    </BehaviorTree>
+
+    <BehaviorTree ID="ExploreXY">
+        <Parallel failure_count="3" success_count="1">
+            <AvoidObstacles name="avoid" ObjectPath="{target_id}" />
+            <GoToXY name="gotoxy" X="{X}" Y="{Y}" TargetID="{target_id}" />
+            <Wander name="wander" />
+        </Parallel>
+    </BehaviorTree>
+
+    <BehaviorTree ID="PickUp">
+        <Sequence>
+            <Place Obj="{Obj}" Color="{Color}" Target="knapsack" Knapsack="{knapsack}" />
+        </Sequence>
+    </BehaviorTree>  
+
+    <BehaviorTree ID="PutDown">
+        <Sequence>
+            <Place Obj="{Obj}" Color="{Color}" Target="ground" Knapsack="{knapsack}" />
+        </Sequence>
+    </BehaviorTree>
+
+</root>

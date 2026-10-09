@@ -6,16 +6,19 @@
 
 class GoToXY : public AttentionalBehavior {
 private:
-    RemoteAPIObjects* simObj_;
+    RemoteAPIObjects* sim_;
     double targetX_ = 0.0;
     double targetY_ = 0.0;
+    int64_t robotHandle_ = -1;
+    double dist_ = 999.0, angleError_ = 0.0;
 
 public:
-    GoToXY(const std::string& name, const BT::NodeConfig& config, RemoteAPIObjects* simObj);
+    GoToXY(const std::string& name, const BT::NodeConfig& config, RemoteAPIObjects* sim);
 
     static BT::PortsList providedPorts();
 
-    bool checkReleaser() override;
+    bool checkInternalReleaser() override;
+    bool checkExternalReleaser() override;
     void updatePerceptualSchema() override;
     std::pair<double, double> executeMotorSchema() override;
 };

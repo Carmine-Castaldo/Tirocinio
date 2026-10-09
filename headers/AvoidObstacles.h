@@ -7,17 +7,24 @@
 
 class AvoidObstacles : public AttentionalBehavior {
 private:
-    RemoteAPIObjects* simObj_;
+    RemoteAPIObjects* sim_;
     std::vector<int64_t> sonarHandles_;
+    std::string target_;
+    int64_t targetHandle_;
+    std::vector<double> distances;
+    bool isObstacle;
 
 public:
-    AvoidObstacles(const std::string& name, const BT::NodeConfig& config, RemoteAPIObjects* simObj);
+    AvoidObstacles(const std::string& name, const BT::NodeConfig& config, RemoteAPIObjects* sim);
 
     static BT::PortsList providedPorts();
 
-    bool checkReleaser() override;
+    bool checkInternalReleaser() override;
+    bool checkExternalReleaser() override;
     void updatePerceptualSchema() override;
     std::pair<double, double> executeMotorSchema() override;
+    double checkSonar(int64_t sonarHandle);
 };
+
 
 #endif // AVOID_OBSTACLES_H

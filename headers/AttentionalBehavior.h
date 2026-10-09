@@ -7,8 +7,6 @@
 #include <string>
 #include <utility>
 
-
-
 class AttentionalBehavior : public BT::ActionNodeBase {
 protected:
     double mu_ = 1.0;
@@ -16,45 +14,23 @@ protected:
     double emphasis_ = 0.0;
 
 public:
-    AttentionalBehavior(const std::string& name, const BT::NodeConfig& config)
-        : BT::ActionNodeBase(name, config) {}
+    AttentionalBehavior(const std::string& name, const BT::NodeConfig& config);
 
-    static BT::PortsList providedPorts() {
-        return { BT::InputPort<double>("mu", 1.0, "Top-Down Regulation mu_b") };
-    }
+    static BT::PortsList providedPorts();
 
-    virtual bool checkReleaser() = 0;
+    virtual bool checkInternalReleaser() = 0;
+    virtual bool checkExternalReleaser() = 0;
     virtual void updatePerceptualSchema() = 0;
     virtual std::pair<double, double> executeMotorSchema() = 0;
+    std::string getUniqueID() const;
 
-    BT::NodeStatus tick() override {
-        getInput("mu", mu_);
-
-        if (!checkReleaser()) {
-            emphasis_ = 0.0;
-            return BT::NodeStatus::FAILURE;
-        }
-
-        updatePerceptualSchema();
-
-        if (lambda_ <= 1e-5) lambda_ = 1e-5;
-        emphasis_ = mu_ / lambda_;
-
-        auto [vLeft, vRight] = executeMotorSchema();
-
-        MotorArbitrator::getInstance().proposeCommand(name(), emphasis_, vLeft, vRight);
-
-        return BT::NodeStatus::RUNNING;
-    }
-
-    void halt() override {
-        emphasis_ = 0.0;
-        setStatus(BT::NodeStatus::IDLE);
-    }
+    BT::NodeStatus tick() override;
+    void halt() override;
 
     double getEmphasis() const { return emphasis_; }
     double getLambda() const { return lambda_; }
     double getMu() const { return mu_; }
+    void setMu(double mu) { mu_ = mu;}
 };
 
 #endif // ATTENTIONAL_BEHAVIOR_H

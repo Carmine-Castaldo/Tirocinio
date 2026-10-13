@@ -8,6 +8,7 @@ BT::PortsList Place::providedPorts(){
         BT::InputPort<std::string>("Obj"),
         BT::InputPort<std::string>("Color"),
         BT::InputPort<std::string>("Target"),
+        BT::BidirectionalPort<bool>("Done"),
         BT::BidirectionalPort<std::vector<int>>("Knapsack")
     };
     auto basePorts = AttentionalBehavior::providedPorts();
@@ -26,8 +27,13 @@ bool Place::checkInternalReleaser(){
 }
 
 bool Place::checkExternalReleaser(){
+    bool isDone = false;
+    getInput("Done", isDone);
+
+    if (target_ == "knapsack" && isDone ) return false;      
     
-    if(target_ == "ground") distance = sim_->getDistanceTo("/Bill");
+    
+    if (target_ == "ground") distance = sim_->getDistanceTo("/Bill");
     else distance = sim_->getDistanceTo(objectPath_);
 
     return (distance < 0.6);
@@ -38,6 +44,7 @@ void Place::updatePerceptualSchema() {
     getInput("Target", target_);
     getInput("Obj", objectPath_);
     getInput("Knapsack", knapsack);
+
     if (!objectPath_.empty())
         targetHandle_ = sim_->sim().getObjectHandle(objectPath_);
     
@@ -45,9 +52,7 @@ void Place::updatePerceptualSchema() {
 }
 
 std::pair<double, double> Place::executeMotorSchema() {
-    std::cout << "Place executemotorschema" << target_ << std::endl;
     if (target_ == "knapsack") {
-        std::cout << "debug in knapsack" << std::endl;
         size_t n = knapsack.size();
         std::string connectionPath = "/PioneerP3DX/connection[" + std::to_string(n) + "]";
         
@@ -62,7 +67,7 @@ std::pair<double, double> Place::executeMotorSchema() {
             if (std::find(knapsack.begin(), knapsack.end(), static_cast<int>(targetHandle_)) == knapsack.end())
                 knapsack.push_back(static_cast<int>(targetHandle_));
             
-
+            setOutput("Done", true);
             setOutput("Knapsack", knapsack);
         } catch (...) {}
     } else if (target_ == "ground") {
@@ -81,7 +86,7 @@ std::pair<double, double> Place::executeMotorSchema() {
 
         setOutput("Knapsack", knapsack);
     }
-
+    
     return {0.0, 0.0};
 }
 

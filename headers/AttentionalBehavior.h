@@ -12,6 +12,7 @@ protected:
     double mu_ = 1.0;
     double lambda_ = 1.0;
     double emphasis_ = 0.0;
+    int64_t drawHandle_ = -1;
 
 public:
     AttentionalBehavior(const std::string& name, const BT::NodeConfig& config);

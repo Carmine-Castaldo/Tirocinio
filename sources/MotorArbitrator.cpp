@@ -4,6 +4,7 @@
 MotorArbitrator& MotorArbitrator::getInstance() {
     static MotorArbitrator instance;
     return instance;
+
 }
 
 void MotorArbitrator::reset() {
@@ -30,10 +31,9 @@ void MotorArbitrator::proposeCommand(const std::string& behaviorName, double emp
 }
 
 bool MotorArbitrator::getWinningCommand(double& vLeft, double& vRight, std::string& winnerName, double& winnerEmphasis) const {
-    if (maxEmphasis_ < 0.0) {
-        //std::cout << "[MotorArbitrator] Nessun comportamento ha proposto comandi validi in questo ciclo." << std::endl;
+    if (maxEmphasis_ < 0.0) 
         return false;
-    }
+    
     vLeft = winningVLeft_;
     vRight = winningVRight_;
     winnerName = currentWinner_;
@@ -49,16 +49,18 @@ void MotorArbitrator::applyCommand(RemoteAPIObjects* sim, int64_t leftMotor, int
     std::string winner;
     double maxEmp = 0.0;
 
-    std::cout << "[MotorAribitrator] Winner: " << currentWinner_ << std::endl;
-
     if (getWinningCommand(vL, vR, winner, maxEmp)) {
-        previousWinner_ = currentWinner_;
-        if (leftMotor >= 0 && rightMotor >= 0 && sim != nullptr) {
+        if (winner != previousWinner_){
             try {
-                //std::cout << "[MotorAribitrator] vL: " << vL << " vR: " << vR << std::endl;
+                sim->sim().setStringSignal("active_behavior", winner);
+            } catch (...) {}
+        }
+        previousWinner_ = winner;
+        if (leftMotor >= 0 && rightMotor >= 0 && sim != nullptr) {
+            try {           
                 sim->sim().setJointTargetVelocity(leftMotor,  vL );
                 sim->sim().setJointTargetVelocity(rightMotor, vR );
-            } catch (...) {}
+            } catch (...) { std::cout << "Exception Banner" << std::endl; }
         }
     }
 }

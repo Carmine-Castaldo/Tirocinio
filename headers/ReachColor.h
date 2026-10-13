@@ -10,7 +10,7 @@
 class ReachColor : public AttentionalBehavior {
 private:
     RemoteAPIObjects* sim_;
-    std::string objectPath_, color_, target_;
+    std::string color_, target_;
     std::vector<int> knapsack;
     double distance_, relX_ = 0, relY_ = 0;
     int64_t robotHandle_ = -1;

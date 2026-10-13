@@ -9,13 +9,10 @@
 
 class MotorArbitrator {
     private:
-        std::string previousWinner_ = "none";
-        std::string currentWinner_ = "none";
-        double maxEmphasis_ = -1.0;
-        double winningVLeft_ = 0.0;
-        double winningVRight_ = 0.0;
+        std::string previousWinner_ = "none", currentWinner_ = "none";
+        double maxEmphasis_ = -1.0, winningVLeft_ = 0.0, winningVRight_ = 0.0;
+        int64_t bannerHandle_ = -1;
         
-
         MotorArbitrator() = default;
 
     public:

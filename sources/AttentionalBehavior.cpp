@@ -11,21 +11,21 @@ BT::PortsList AttentionalBehavior::providedPorts() {
        updatePerceptualSchema();
         
        if (!checkInternalReleaser() || !checkExternalReleaser()) {
-           emphasis_ = 0.0;
-           return BT::NodeStatus::FAILURE;
+              emphasis_ = 0.0;
+              if(name() == "avoid" && !checkInternalReleaser()) return BT::NodeStatus::RUNNING;
+              return BT::NodeStatus::FAILURE;
        }
 
        if (lambda_ <= 1e-5) lambda_ = 1e-5;
        emphasis_ = mu_ / lambda_;
-       std::cout << "[AttentionalBehavior] nuova emphasis di " << getUniqueID() << ": " << emphasis_ << std::endl;
        auto [vLeft, vRight] = executeMotorSchema();
        if(vLeft == 0.0 && vRight == 0.0){
               std::cout << getUniqueID() << " SUCCESS" << std::endl;
               MotorArbitrator::getInstance().proposeCommand(getUniqueID(), emphasis_, vLeft, vRight);
+              if(name() == "avoid") return BT::NodeStatus::RUNNING;
               return BT::NodeStatus::SUCCESS;
        }
        MotorArbitrator::getInstance().proposeCommand(getUniqueID(), emphasis_, vLeft, vRight);
-
 
        return BT::NodeStatus::RUNNING;
 }
@@ -36,5 +36,11 @@ void AttentionalBehavior::halt(){
 }
 
 std::string AttentionalBehavior::getUniqueID() const {
-    return name() + "_" + std::to_string(reinterpret_cast<uintptr_t>(this));
+       std::string target_, color, toReturn;
+       getInput("ObjectPath",target_);
+       if(!target_.empty() && target_ == "/Bill") 
+              return name() + "_"+ target_ /*+ std::to_string(reinterpret_cast<uintptr_t>(this))*/;
+       if(getInput("Color", color))
+              return name() + "_"+ color /*+ std::to_string(reinterpret_cast<uintptr_t>(this))*/;
+       return name() + "_" /*+ std::to_string(reinterpret_cast<uintptr_t>(this))*/;
 }

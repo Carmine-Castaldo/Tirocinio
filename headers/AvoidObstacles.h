@@ -10,9 +10,9 @@ private:
     RemoteAPIObjects* sim_;
     std::vector<int64_t> sonarHandles_;
     std::string target_;
-    int64_t targetHandle_;
+    int64_t targetHandle_, robotHandle_;
     std::vector<double> distances;
-    bool isObstacle;
+    bool isObstacle;    
 
 public:
     AvoidObstacles(const std::string& name, const BT::NodeConfig& config, RemoteAPIObjects* sim);

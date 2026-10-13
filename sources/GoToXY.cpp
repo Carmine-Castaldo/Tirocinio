@@ -4,10 +4,10 @@
 #include <algorithm>
 
 GoToXY::GoToXY(const std::string& name, const BT::NodeConfig& config, RemoteAPIObjects* sim)
-        : AttentionalBehavior(name, config), sim_(sim) {
-            setMu(0.5);
-            robotHandle_ = sim_->sim().getObjectHandle("/PioneerP3DX");
-        }
+    : AttentionalBehavior(name, config), sim_(sim) {
+    setMu(0.5);
+    robotHandle_ = sim_->sim().getObjectHandle("/PioneerP3DX");
+}
 
 BT::PortsList GoToXY::providedPorts() {
     BT::PortsList ports = { 
@@ -19,6 +19,7 @@ BT::PortsList GoToXY::providedPorts() {
     ports.insert(basePorts.begin(), basePorts.end());
     return ports;
 }
+
 void GoToXY::updatePerceptualSchema() {
     if (!getInput("X", targetX_) || !getInput("Y", targetY_)) {
         dist_ = 999.0;
@@ -41,10 +42,6 @@ void GoToXY::updatePerceptualSchema() {
         double targetAngle = std::atan2(dy, dx);
         angleError_ = std::atan2(std::sin(targetAngle - yaw), std::cos(targetAngle - yaw));
 
-        // std::cout << "[GoToXY] Target: (" << targetX_ << ", " << targetY_
-        //           << ") | Dist: " << dist_ << " | Lambda: " << lambda_
-        //           << " mu: " << getMu() << std::endl;
-
     } catch (const std::exception& e) {
         dist_ = 999.0;
         lambda_ = 10.0;
@@ -66,6 +63,7 @@ bool GoToXY::checkExternalReleaser() {
 }
 
 std::pair<double, double> GoToXY::executeMotorSchema() {
+
     if (dist_ <= 0.45) return {0.0, 0.0};
 
     double v = 0.25 * std::max(0.0, std::cos(angleError_));

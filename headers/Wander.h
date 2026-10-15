@@ -13,6 +13,7 @@ private:
     double current_dist_ = 999.0;
     int64_t robotHandle_ = -1;
     double angleError_ = 0.0;
+    double retargetAt_ = 0.0;
 
     std::mt19937 rng_{std::random_device{}()};
     std::uniform_real_distribution<double> dist_{-6.0, 6.0};

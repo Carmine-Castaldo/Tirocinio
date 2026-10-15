@@ -4604,8 +4604,11 @@ public:
     RemoteAPIObject::sim sim();
     RemoteAPIObject::simIK simIK();
     std::vector<double> getObjectPosition(const std::string& objectPath) {
-        int64_t handle = this->sim().getObjectHandle(objectPath);
-        return this->sim().getObjectPosition(handle, -1);
+        static std::unordered_map<std::string, int64_t> cache;
+        auto it = cache.find(objectPath);
+        if (it == cache.end())
+                it = cache.emplace(objectPath, this->sim().getObjectHandle(objectPath)).first;
+        return this->sim().getObjectPosition(it->second, -1);
     }
 
         

@@ -19,11 +19,8 @@ BT::PortsList Place::providedPorts(){
 bool Place::checkInternalReleaser(){
     if (targetHandle_ == -1) return false;
     bool inKnapsack = (std::find(knapsack.begin(), knapsack.end(), static_cast<int>(targetHandle_)) != knapsack.end());
-    if (target_ == "ground")
-        return inKnapsack;
-    else
-        return (knapsack.size() < 4 && !inKnapsack);
-    
+    if (target_ == "ground")return inKnapsack;
+    else return (knapsack.size() < 4 && !inKnapsack);
 }
 
 bool Place::checkExternalReleaser(){
@@ -31,24 +28,22 @@ bool Place::checkExternalReleaser(){
     getInput("Done", isDone);
 
     if (target_ == "knapsack" && isDone ) return false;      
-    
-    
-    if (target_ == "ground") distance = sim_->getDistanceTo("/Bill");
-    else distance = sim_->getDistanceTo(objectPath_);
 
     return (distance < 0.6);
 }
 
 void Place::updatePerceptualSchema() {
-    lambda_ = 1.0;
     getInput("Target", target_);
     getInput("Obj", objectPath_);
     getInput("Knapsack", knapsack);
-
-    if (!objectPath_.empty())
+    if (!objectPath_.empty() && objectPath_ != previousPath_) {
         targetHandle_ = sim_->sim().getObjectHandle(objectPath_);
-    
-    std::cout << "[Place] Target:" << target_ << " ObjectPath: " << objectPath_ << std::endl;
+        previousPath_ = objectPath_;
+    }
+    distance = 999.0;
+    try { distance = sim_->getDistanceTo(target_ == "ground" ? "/Bill" : objectPath_); }
+    catch (...) {}
+    lambda_ = saturatingLambda(distance, 0.5, 1.0);
 }
 
 std::pair<double, double> Place::executeMotorSchema() {
@@ -83,7 +78,7 @@ std::pair<double, double> Place::executeMotorSchema() {
         if (it != knapsack.end()) {
             knapsack.erase(it);
         }
-
+        setOutput("Done", false);
         setOutput("Knapsack", knapsack);
     }
     

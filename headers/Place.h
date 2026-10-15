@@ -9,8 +9,7 @@
 class Place : public AttentionalBehavior {
 private:
     RemoteAPIObjects* sim_;
-    std::string objectPath_;
-    std::string target_;
+    std::string objectPath_, target_, previousPath_;
     std::vector<int> knapsack;
     int64_t targetHandle_ = -1;
     double distance = 999.0;

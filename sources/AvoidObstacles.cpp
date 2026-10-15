@@ -1,14 +1,21 @@
     #include "AvoidObstacles.h"
+    #include "SharedPerception.h"
 
     AvoidObstacles::AvoidObstacles(const std::string& name, const BT::NodeConfig& config, RemoteAPIObjects* sim)
-                    : AttentionalBehavior(name, config), sim_(sim){
-                        int64_t leftSonar = sim_->sim().getObjectHandle("/PioneerP3DX/ultrasonicSensor[3]");
-                        int64_t frontSonar = sim_->sim().getObjectHandle("/PioneerP3DX/ultrasonicSensor[4]");
-                        int64_t rightSonar = sim_->sim().getObjectHandle("/PioneerP3DX/ultrasonicSensor[5]");
-                        robotHandle_ = sim_->sim().getObjectHandle("/PioneerP3DX");
-                        sonarHandles_ = {leftSonar, frontSonar, rightSonar};
-                        
-                    }
+        : AttentionalBehavior(name, config), sim_(sim) {
+        robotHandle_ = sim_->sim().getObjectHandle("/PioneerP3DX");
+
+        for (int i = 1; i <= 6; ++i) {
+            int64_t h = sim_->sim().getObjectHandle(
+                "/PioneerP3DX/ultrasonicSensor[" + std::to_string(i) + "]");
+            sonarHandles_.push_back(h);
+
+            auto p = sim_->sim().getObjectPosition(h, robotHandle_);
+            double a = std::atan2(p[1], p[0]);
+            sonarSide_.push_back((a > 0.35) ? +1 : (a < -0.35 ? -1 : 0));
+        }
+        lastDistances_.assign(sonarHandles_.size(), -1.0);
+    }
 
     BT::PortsList AvoidObstacles::providedPorts(){
         BT::PortsList ports = {
@@ -19,43 +26,47 @@
         return ports;
     }
 
-    bool isTargetOrChild(RemoteAPIObjects* sim, int64_t detected, int64_t target, int64_t robotHandle_) {
-        if (detected == -1 || target == -1) return false;
-        int64_t current = detected;
-
-        while (current != -1) {
-            if (current == target || current == robotHandle_) return true;
+    bool AvoidObstacles::isIgnored(int64_t detected) {
+        if (detected == -1) return false;
+        if (detected == targetHandle_) return true;
+        if (!ignoredValid_) {
+            ignored_.clear();
             try {
-                current = sim->sim().getObjectParent(current);
-            } catch (...) {
-                break;
-            }
+                for (auto h : sim_->sim().getObjectsInTree(robotHandle_)) ignored_.insert(h);
+            } catch (...) {}
+            ignoredValid_ = true;
         }
-        return false;
+        return ignored_.count(detected) > 0;
     }
 
-    double AvoidObstacles::checkSonar(int64_t sonarHandle) {
-        auto readSonar = sim_->sim().readProximitySensor(sonarHandle);
-        if (std::get<0>(readSonar) == 1) {
-            int64_t detectedHandle = std::get<3>(readSonar);
-            if (!isTargetOrChild(sim_, detectedHandle, targetHandle_, robotHandle_))
-                return std::get<1>(readSonar);
+    double AvoidObstacles::checkSonar(int64_t h) {
+        const auto& r = SharedPerception::get().sonar(h);
+        if (std::get<0>(r) == 1) {
+            int64_t det = std::get<3>(r);
+            if (!SharedPerception::get().isGoal(det) &&
+                !SharedPerception::get().inRobotTree(det))
+                return std::get<1>(r);
         }
-        
         return -1;
     }
 
+
     void AvoidObstacles::updatePerceptualSchema() {
-
         std::string path;
-        targetHandle_ = -1;
-        if (getInput("ObjectPath", path) && !path.empty()) {
-            try { targetHandle_ = sim_->sim().getObjectHandle(path); } catch (...) {}
+        getInput("ObjectPath", path);
+        if (path != previousPath_) {
+            targetHandle_ = -1;
+            if (path.empty())
+                previousPath_ = path;
+            else {
+                try { targetHandle_ = sim_->sim().getObjectHandle(path); previousPath_ = path; }
+                catch (...) {}
+            }
         }
-
-        distances = { checkSonar(sonarHandles_[0]),
-                    checkSonar(sonarHandles_[1]),
-                    checkSonar(sonarHandles_[2]) };
+        ignoredValid_ = false;
+        distances.assign(sonarHandles_.size(), -1.0);
+        for (size_t i = 0; i < sonarHandles_.size(); ++i)
+            distances[i] = checkSonar(sonarHandles_[i]);
 
         isObstacle = false;
         double minDistance = 999.0;
@@ -66,58 +77,48 @@
             }
         }
 
-        lambda_ = isObstacle ? std::max(0.05, minDistance) : 1.0;
-
-        // std::cout << "[AvoidObstacles DEBUG] Sonars L/C/R: (" 
-        //           << distances[0] << ", " << distances[1] << ", " << distances[2] << ")"
-        //           << " | IsObstacle: " << (isObstacle ? "YES" : "NO")
-        //           << " | Lambda: " << lambda_ 
-        //           << std::endl;
+        const double t = SharedPerception::get().time();
+        if (isObstacle) { holdUntil_ = t + kHoldSec; lastDistances_ = distances; lastMinDist_ = minDistance; }
+        else if (t >= holdUntil_) turnSign_ = 0;
+        lambda_ = saturatingLambda(isObstacle ? minDistance : lastMinDist_, 0.5, 1.0);
+        
     }
 
     bool AvoidObstacles::checkInternalReleaser(){
-        return isObstacle;
+        return isObstacle || SharedPerception::get().time() < holdUntil_;
     }
 
     bool AvoidObstacles::checkExternalReleaser(){
         return true;
     }
-    
-    std::pair<double, double> AvoidObstacles::executeMotorSchema() {
-        double dLeft   = distances[0];
-        double dCenter = distances[1];
-        double dRight  = distances[2];
-        
-        double minSideDist = 999.0;
-        if (dLeft > 0.0)  minSideDist = std::min(minSideDist, dLeft);
-        if (dRight > 0.0) minSideDist = std::min(minSideDist, dRight);
-        
-        double minTotalDist = minSideDist;
+    std::pair<double,double> AvoidObstacles::executeMotorSchema() {
+        const auto& d = isObstacle ? distances : lastDistances_;
 
+        double turn = 0.0, minDist = 999.0, minCenter = 999.0, leftSum = 0.0, rightSum = 0.0;
+        for (size_t i = 0; i < d.size(); ++i) {
+            if (d[i] <= 0.0) continue;
+            minDist = std::min(minDist, d[i]);
+            double w = 1.0 / (d[i] + 0.20);
+            if (sonarSide_[i] > 0) { turn -= w; leftSum  += w; }
+            else if (sonarSide_[i] < 0) { turn += w; rightSum += w; }
+            else                        { minCenter = std::min(minCenter, d[i]); }
+        }
 
-        double turn = 0.0;
-        if (dLeft   > 0.0) turn -= 1.0 / (dLeft   + 0.20);
-        if (dRight  > 0.0) turn += 1.0 / (dRight  + 0.20);
-        if (dCenter > 0.0) {
-            if (dLeft > 0.0 && dRight > 0.0) turn += (dLeft > dRight) ? (1.0 / (dCenter + 0.20)) : (-1.0 / (dCenter + 0.20));
-            else if (dRight > 0.0) turn += 1.0 / (dCenter + 0.20);
-            else turn -= 1.0 / (dCenter + 0.20);
+        bool symmetric = std::abs(turn) < 0.3 * std::max(leftSum, rightSum);
+        if (minCenter < 999.0 || symmetric) {
+            if (turnSign_ == 0) turnSign_ = (leftSum > rightSum) ? -1 : +1;
+            turn += turnSign_ * (1.0 / (std::min(minCenter, minDist) + 0.20));
         }
 
         double v = 0.35;
-        if (minTotalDist < 0.20)
-            v = 0.05; 
-        else if (minTotalDist < 0.40) 
-            v = 0.18;
-        
+        if (minDist < 0.20) v = 0.05;
+        else if (minDist < 0.40) v = 0.18;
 
-        double w_gain = (minSideDist < 0.35) ? 0.55 : 0.35;
-        double w = std::clamp(turn * w_gain, -0.85, 0.85);
+        double w_gain = (minDist < 0.35) ? 0.55 : 0.35;
+        double w = std::clamp(turn * w_gain, -1.2, 1.2);
 
-        double L = 0.331;
-        double v_left  = v - (w * L) / 2.0;
-        double v_right = v + (w * L) / 2.0;
-        
-        return {v_left, v_right};
+        const double L = 0.331;
+        return { v - w * L / 2.0, v + w * L / 2.0 };
     }
-
+    
+    

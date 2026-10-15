@@ -1,13 +1,12 @@
 #include "ReachColor.h"
+#include "SharedPerception.h" 
 #include <iostream>
 #include <cmath>
 #include <algorithm>
 
 ReachColor::ReachColor(const std::string& name, const BT::NodeConfig& config, RemoteAPIObjects* sim)
     : AttentionalBehavior(name, config), sim_(sim) {
-    setMu(2.0);
     robotHandle_ = sim_->sim().getObjectHandle("/PioneerP3DX");
-    drawHandle_ = -1;
 }
 
 BT::PortsList ReachColor::providedPorts() {
@@ -24,65 +23,76 @@ BT::PortsList ReachColor::providedPorts() {
 }
 
 void ReachColor::updatePerceptualSchema() {
+    distance_ = 999.0;
+    lambda_   = 1.0;
+
     getInput("ObjectPath", target_);
     getInput("Knapsack", knapsack);
+    if (target_.empty()) return;
 
-    if (target_.empty()) {
-        distance_ = 999.0;
-        lambda_ = 20.0;
-        return;
+    bool taken = false;
+    getInput("Done", taken);                       // Done = "questo cubo è stato preso"
+    if (target_ == "/Bill") {
+        if (!taken || knapsack.empty()) return;    // consegno solo se ho preso QUESTO cubo
+    } else {
+        if (taken) return;
+        if (isObjectInKnapsack()) return;
     }
 
     try {
-        int64_t th = sim_->sim().getObjectHandle(target_);
-        auto pos = sim_->sim().getObjectPosition(th, robotHandle_);
+       
+        targetHandle_ = resolveTarget();
+        auto pos = sim_->sim().getObjectPosition(targetHandle_, robotHandle_);;
         relX_ = pos[0]; 
         relY_ = pos[1];
         distance_ = std::hypot(relX_, relY_);
-        lambda_ = std::max(0.1, distance_);
+        lambda_ = saturatingLambda(distance_, 1.0, 10.0);
     } catch (...) {
         distance_ = 999.0;
-        lambda_ = 20.0;
+        lambda_ = 1.0;
     }
 }
 
 bool ReachColor::checkInternalReleaser() {
-    if (distance_ > 10.0 || distance_ < 0.45) return false;
+    if (distance_ > 10.0 ) return false;
     return true;
 }
 
-bool isObjectInKnapsack(RemoteAPIObjects* sim_, std::string target_, std::vector<int> knapsack) {
+
+bool ReachColor::checkExternalReleaser() {
+    bool isDone = false;
+    getInput("Done", isDone);
+    
+    if (target_ == "/Bill") 
+        return isDone && !knapsack.empty();
+
+    if (isDone || isObjectInKnapsack()) return false; 
+
+    return true;
+}
+
+
+int64_t ReachColor::resolveTarget() {
+    if (target_ != previousTarget_) {
+        targetHandle_ = sim_->sim().getObjectHandle(target_);
+        previousTarget_ = target_;
+    }
+    return targetHandle_;
+}
+
+bool ReachColor::isObjectInKnapsack(){
     try {
-        int64_t targetHandle = sim_->sim().getObjectHandle(target_);
-        int targetHandleInt = static_cast<int>(targetHandle);
+        targetHandle_ = resolveTarget();
+        int targetHandleInt = static_cast<int>(targetHandle_);
         return (std::find(knapsack.begin(), knapsack.end(), targetHandleInt) != knapsack.end());
     } catch (...) {
         return false;
     }
 }
 
-bool isKnapsackFull(std::vector<int> knapsack) {
-    return (knapsack.size() > 3);
-}
-
-bool ReachColor::checkExternalReleaser() {
-    bool isDone = false;
-    getInput("Done", isDone);
-    if (isDone) return false;
-
-    if (target_ == "/Bill") {
-        if (!knapsack.empty()) return true; 
-        return false;
-    }
-
-    if (isObjectInKnapsack(sim_, target_, knapsack)) return false; 
-
-    return true;
-}
 
 std::pair<double, double> ReachColor::executeMotorSchema() {
     
-
     if (distance_ <= 0.55) return {0.0, 0.0};
 
     double angle = std::atan2(relY_, relX_);

@@ -27,7 +27,6 @@ void GoToXY::updatePerceptualSchema() {
         lambda_ = 1.0;
         return;
     }
-
     try {
         const auto& robotPos = SharedPerception::get().position();
   
@@ -54,8 +53,7 @@ void GoToXY::updatePerceptualSchema() {
 bool GoToXY::checkInternalReleaser() {
     if (std::abs(targetX_) > 7.5 || std::abs(targetY_) > 7.5)
         return false;
-    
-    return true;
+    return true; 
 }
 
 bool GoToXY::checkExternalReleaser() {
@@ -65,13 +63,12 @@ bool GoToXY::checkExternalReleaser() {
     getInput("TargetID", tgt);
 
     if (tgt == "/Bill") return isDone;
-    
     return !isDone;
 }
 
 
 std::pair<double, double> GoToXY::executeMotorSchema() {
-    if (dist_ <= 0.45) return {0.0, 0.0};
+    if (dist_ <= 0.55) return {0.0, 0.0};
 
     double v = 0.25 * std::max(0.0, std::cos(angleError_));
     double w = std::clamp(angleError_ * 1.0, -0.8, 0.8);

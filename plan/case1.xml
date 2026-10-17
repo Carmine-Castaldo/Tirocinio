@@ -2,26 +2,35 @@
 
 <BehaviorTree ID="MainTree1">
   <Parallel failure_count="1" success_count="2">
-    <SubTree ID="Task1" knapsack="{knapsack}" />
-    <SubTree ID="Task2" knapsack="{knapsack}" />
+    <SubTree ID="Task1" knapsack="{knapsack}" mu="{mu}" 
+             YellowCube_x="{YellowCube_x}" YellowCube_y="{YellowCube_y}" 
+             OrangeCube_x="{OrangeCube_x}" OrangeCube_y="{OrangeCube_y}" 
+             Bill_x="{Bill_x}" Bill_y="{Bill_y}" 
+             done_yellow="{done_yellow}" done_orange="{done_orange}"/>
+             
+    <SubTree ID="Task2" knapsack="{knapsack}" mu="{mu}" 
+             GreenCube_x="{GreenCube_x}" GreenCube_y="{GreenCube_y}" 
+             RedCube_x="{RedCube_x}" RedCube_y="{RedCube_y}" 
+             Bill_x="{Bill_x}" Bill_y="{Bill_y}" 
+             done_green="{done_green}" done_red="{done_red}"/>
   </Parallel>
 </BehaviorTree>
 
 <BehaviorTree ID="Task1">
   <Parallel failure_count="4" success_count="4">
-    <SubTree ID="Take"   Obj="/YellowCube" Color="Yellow" X="-6.0" Y="5.5"  knapsack="{knapsack}" Done="{done_yellow}" mu="{mu}"/>
-    <SubTree ID="Take"   Obj="/OrangeCube" Color="Orange" X="5.5"  Y="-6.0" knapsack="{knapsack}" Done="{done_orange}" mu="{mu}"/>
-    <SubTree ID="Return" Obj="/YellowCube" Color="Yellow" X="0.0"  Y="0.0"  knapsack="{knapsack}" Done="{done_yellow}" mu="{mu}"/>
-    <SubTree ID="Return" Obj="/OrangeCube" Color="Orange" X="0.0"  Y="0.0"  knapsack="{knapsack}" Done="{done_orange}" mu="{mu}"/>
+    <SubTree ID="Take"   Obj="/YellowCube" Color="Yellow" X="{YellowCube_x}" Y="{YellowCube_y}" knapsack="{knapsack}" Done="{done_yellow}" mu="{mu}"/>
+    <SubTree ID="Take"   Obj="/OrangeCube" Color="Orange" X="{OrangeCube_x}" Y="{OrangeCube_y}" knapsack="{knapsack}" Done="{done_orange}" mu="{mu}"/>
+    <SubTree ID="Return" Obj="/YellowCube" Color="Yellow" X="{Bill_x}"       Y="{Bill_y}"       knapsack="{knapsack}" Done="{done_yellow}" mu="{mu}"/>
+    <SubTree ID="Return" Obj="/OrangeCube" Color="Orange" X="{Bill_x}"       Y="{Bill_y}"       knapsack="{knapsack}" Done="{done_orange}" mu="{mu}"/>
   </Parallel>
 </BehaviorTree>
 
 <BehaviorTree ID="Task2">
   <Parallel failure_count="4" success_count="4">
-    <SubTree ID="Take"   Obj="/GreenCube" Color="Green" X="5.5"  Y="-2.0" knapsack="{knapsack}" Done="{done_green}" mu="{mu}"/>
-    <SubTree ID="Take"   Obj="/RedCube"   Color="Red"   X="-6.0" Y="-6.0" knapsack="{knapsack}" Done="{done_red}"   mu="{mu}"/>
-    <SubTree ID="Return" Obj="/GreenCube" Color="Green" X="0.0"  Y="0.0"  knapsack="{knapsack}" Done="{done_green}" mu="{mu}"/>
-    <SubTree ID="Return" Obj="/RedCube"   Color="Red"   X="0.0"  Y="0.0"  knapsack="{knapsack}" Done="{done_red}"   mu="{mu}"/>
+    <SubTree ID="Take"   Obj="/GreenCube" Color="Green" X="{GreenCube_x}" Y="{GreenCube_y}" knapsack="{knapsack}" Done="{done_green}" mu="{mu}"/>
+    <SubTree ID="Take"   Obj="/RedCube"   Color="Red"   X="{RedCube_x}"   Y="{RedCube_y}"   knapsack="{knapsack}" Done="{done_red}"   mu="{mu}"/>
+    <SubTree ID="Return" Obj="/GreenCube" Color="Green" X="{Bill_x}"      Y="{Bill_y}"      knapsack="{knapsack}" Done="{done_green}" mu="{mu}"/>
+    <SubTree ID="Return" Obj="/RedCube"   Color="Red"   X="{Bill_x}"      Y="{Bill_y}"      knapsack="{knapsack}" Done="{done_red}"   mu="{mu}"/>
   </Parallel>
 </BehaviorTree>
 
@@ -41,7 +50,7 @@
   <Parallel failure_count="2" success_count="1">
     <SubTree ID="FollowColor" Color="{Color}" ObjectPath="{Obj}" knapsack="{knapsack}" Done="{Done}" mu="{mu}"/>
     <ForceFailure>
-      <SubTree ID="ExploreXY"   X="{X}" Y="{Y}" target_id="{Obj}" Done="{Done}" mu="{mu}"/>
+      <SubTree ID="ExploreXY" X="{X}" Y="{Y}" target_id="{Obj}" Done="{Done}" mu="{mu}"/>
     </ForceFailure>
   </Parallel>
 </BehaviorTree>

@@ -49,7 +49,8 @@ void Place::updatePerceptualSchema() {
 std::pair<double, double> Place::executeMotorSchema() {
     if (target_ == "knapsack") {
         size_t n = knapsack.size();
-        std::string connectionPath = "/PioneerP3DX/connection[" + std::to_string(n) + "]";
+        int index = n + 6;
+        std::string connectionPath = "/PioneerP3DX/connection[" + std::to_string(index)  + "]";
         
         try {
             int64_t connHandle = sim_->sim().getObjectHandle(connectionPath);

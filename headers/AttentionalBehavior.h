@@ -26,6 +26,7 @@ protected:
         return lmin + (lmax - lmin) * (s - rmin) / (rmax - rmin);
     }
     virtual bool accomplishesTask() const { return false; }
+    
     void taskAccomplished() {
         if (accomplished_) return;
         accomplished_ = true;

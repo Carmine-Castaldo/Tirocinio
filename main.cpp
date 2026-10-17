@@ -40,7 +40,9 @@ int main(int argc, char** argv) {
     int64_t leftMotor  = sim.sim().getObjectHandle("/PioneerP3DX/leftMotor");
     int64_t rightMotor = sim.sim().getObjectHandle("/PioneerP3DX/rightMotor");
     int64_t robot      = sim.sim().getObjectHandle("/PioneerP3DX");
-    SharedPerception::get().setup(&sim, robot);
+    int64_t camera     = sim.sim().getObjectHandle("/PioneerP3DX/visionSensor");
+    std::cout << "camerahandle main: " << camera << std::endl;
+    SharedPerception::get().setup(&sim, robot, camera);
 
     auto cubes = randomizeCubes(sim, seed,
                                 {"/GreenCube", "/RedCube", "/YellowCube", "/OrangeCube"},
@@ -50,6 +52,17 @@ int main(int argc, char** argv) {
         f << "cube,x,y\n";
         for (const auto& c : cubes) f << c.path << ',' << c.x << ',' << c.y << '\n';
     }
+    auto blackboard = tree.rootBlackboard();
+    for (const auto& c : cubes) {
+        std::string cleanName = c.path.substr(1);         
+        blackboard->set(cleanName + "_x", c.x);
+        blackboard->set(cleanName + "_y", c.y);
+        std::cout << "Object gotoxy: " << cleanName << "(x,y): " << "("<< c.x << "," << c.y << ")" << std::endl;
+    }
+    int64_t billHandle = sim.sim().getObjectHandle("/Bill");
+    auto posBill = sim.sim().getObjectPosition(billHandle, -1);
+    blackboard->set("Bill_x", posBill[0]);
+    blackboard->set("Bill_y", posBill[1]);
     DecisionLogger::get().open(out + "/decisions_seed" + std::to_string(seed) + ".csv");
 
     sim.sim().startSimulation();
@@ -60,8 +73,11 @@ int main(int argc, char** argv) {
     bool havePrev = false;
     BT::NodeStatus st;
 
+    // Lo stepping è solo un modo per ''cozzare'' meglio l'esecuzione dell'albero e del codice con il simulatore
+    // il simulatore avanza nel tempo solo quando viene invocato client.step()
     while (true) {
         SharedPerception::get().newTick();
+        sim.sim().handleVisionSensor(camera); 
         const double t = SharedPerception::get().time();
         const auto& pos = SharedPerception::get().position();
         if (havePrev) pathLen += std::hypot(pos[0] - px, pos[1] - py);
@@ -78,6 +94,7 @@ int main(int argc, char** argv) {
         }
         if (t > maxT) break;
     }
+
     if (result != "SUCCESS") {
         std::vector<std::tuple<long long, std::string, unsigned>> rows;
         tree.applyVisitor([&](const BT::TreeNode* n) {
@@ -85,7 +102,7 @@ int main(int argc, char** argv) {
             if (ns.last_result == BT::NodeStatus::FAILURE)
                 rows.emplace_back(ns.last_timestamp.count(), n->fullPath(), ns.failure_count);
         });
-        std::sort(rows.rbegin(), rows.rend());          // i più recenti per primi
+        std::sort(rows.rbegin(), rows.rend());            // i più recenti per primi
         std::ofstream f(out + "/failures_seed" + std::to_string(seed) + ".txt");
         for (size_t i = 0; i < rows.size() && i < 15; ++i)
             f << std::get<0>(rows[i]) << " ms  " << std::get<1>(rows[i])
@@ -99,11 +116,13 @@ int main(int argc, char** argv) {
     const std::string summary = out + "/summary.csv";
     const bool exists = std::ifstream(summary).good();
     std::ofstream s(summary, std::ios::app);
+
     if (!exists) s << "seed,result,sim_time_s,path_m\n";
     s << seed << ',' << result << ',' << tEnd << ',' << pathLen << '\n';
     std::cout << "[TRIAL " << seed << "] " << result << " t=" << tEnd << "s path=" << pathLen << "m\n";
 
     client.setStepping(false);
     sim.sim().stopSimulation();
+
     return 0;
 }

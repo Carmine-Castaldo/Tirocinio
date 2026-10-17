@@ -11,12 +11,13 @@ public:
 
     static SharedPerception& get() { static SharedPerception s; return s; }
 
-    void setup(RemoteAPIObjects* sim, int64_t robot) { sim_ = sim; robot_ = robot; }
+    void setup(RemoteAPIObjects* sim, int64_t robot, int64_t camera) { sim_ = sim; robot_ = robot; camera_ = camera; }
     void newTick() { poseOk_ = false; treeOk_ = false; sonar_.clear(); goal_ = bestGoal_;                              // il goal del tick precedente (ritardo di 1 tick: irrilevante)
                      bestGoal_ = -1; bestE_ = -1.0; timeOk_ = false;}
 
     const std::vector<double>& position()    { refreshPose(); return pos_; }
     const std::vector<double>& orientation() { refreshPose(); return ori_; }
+    const int64_t cameraHandle(){ return camera_;}
 
     const Sonar& sonar(int64_t h) { 
         auto it = sonar_.find(h);
@@ -59,7 +60,7 @@ private:
         poseOk_ = true;
     }
     RemoteAPIObjects* sim_ = nullptr;
-    int64_t robot_ = -1;
+    int64_t robot_ = -1, camera_ = -1;
     bool poseOk_ = false, treeOk_ = false;
     std::vector<double> pos_, ori_;
     std::unordered_map<int64_t, Sonar> sonar_;

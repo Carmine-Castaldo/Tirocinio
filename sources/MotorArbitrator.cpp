@@ -43,12 +43,14 @@ void MotorArbitrator::applyCommand(RemoteAPIObjects* sim, int64_t leftMotor, int
     const Proposal* win = nullptr;
     for (auto& p : proposals_)
         if (p.exclusive && (!win || p.emphasis > win->emphasis)) win = &p;
-
+        //sceglie tra le proposte exclusive (nodi che non possono essere sovrapposti, risuluzione dei conflitti)
+        //quello con l'enfasi più alta 
     std::unordered_map<std::string, const Proposal*> uniq;
     for (auto& p : proposals_)
         if (!p.exclusive) { auto& s = uniq[p.id]; if (!s || p.emphasis > s->emphasis) s = &p; }
 
     double sE = 0, sL = 0, sR = 0; const Proposal* top = nullptr;
+
     auto add = [&](const Proposal* p) {
         sE += p->emphasis; sL += p->emphasis * p->vL; sR += p->emphasis * p->vR;
         if (!top || p->emphasis > top->emphasis) top = p;
@@ -65,7 +67,7 @@ void MotorArbitrator::applyCommand(RemoteAPIObjects* sim, int64_t leftMotor, int
         }
     if (sim != nullptr && leftMotor >= 0 && rightMotor >= 0) {
         try {
-            sim->sim().setJointTargetVelocity(leftMotor,  vL / 0.0975);
+            sim->sim().setJointTargetVelocity(leftMotor,  vL / 0.0975); //raggio ruota
             sim->sim().setJointTargetVelocity(rightMotor, vR / 0.0975);
         } catch (...) { std::cout << "Exception Banner" << std::endl; }
     }

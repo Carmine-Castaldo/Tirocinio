@@ -32,8 +32,8 @@ BT::NodeStatus AttentionalBehavior::tick() {
             lastStatus_ = BT::NodeStatus::RUNNING;
         }
 
-       const double e = std::max(emphasis_, 1e-3);
-       const double period = std::min(1.0 / e, 5.0);
+       const double e = std::max(emphasis_, 1e-3); // altrimenti, a volte, period va a inf
+       const double period = 1.0 / e;
        nextActivation_ = now + period;
 
        std::cout << "[CLOCK] t=" << now << " " << getUniqueID()

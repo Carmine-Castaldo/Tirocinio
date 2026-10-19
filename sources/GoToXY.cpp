@@ -13,7 +13,7 @@ BT::PortsList GoToXY::providedPorts() {
     BT::PortsList ports = { 
         BT::InputPort<double>("X"), 
         BT::InputPort<double>("Y"),
-        BT::InputPort<std::string>("TargetID"),
+        BT::InputPort<std::string>("Object"),
         BT::InputPort<bool>("Done")
     };
     auto basePorts = AttentionalBehavior::providedPorts();
@@ -59,10 +59,10 @@ bool GoToXY::checkInternalReleaser() {
 bool GoToXY::checkExternalReleaser() {
     bool isDone = false;
     getInput("Done", isDone);
-    std::string tgt;
-    getInput("TargetID", tgt);
+    std::string target;
+    getInput("Object", target);
 
-    if (tgt == "/Bill") return isDone;
+    if (target == "/Bill") return isDone;
     return !isDone;
 }
 

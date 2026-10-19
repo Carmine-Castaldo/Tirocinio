@@ -36,8 +36,8 @@ ReachColor::ReachColor(const std::string& name, const BT::NodeConfig& config, Re
 BT::PortsList ReachColor::providedPorts() {
     BT::PortsList ports = {
         BT::InputPort<std::string>("Color"),
-        BT::InputPort<std::string>("ObjectPath"),
-        BT::InputPort<std::vector<int>>("Knapsack"),
+        BT::InputPort<std::string>("Object"),
+        BT::InputPort<std::vector<int>>("knapsack"),
         BT::InputPort<bool>("Done"),
         BT::InputPort<bool>("Return")
     };
@@ -51,8 +51,8 @@ void ReachColor::updatePerceptualSchema() {
     lambda_   = 1.0;
     isTargetVisible_ = false;
 
-    getInput("ObjectPath", target_);
-    getInput("Knapsack", knapsack);
+    getInput("Object", target_);
+    getInput("knapsack", knapsack);
     if (target_.empty()) { tracking_ = false; return; }
 
     bool taken = false;
@@ -109,7 +109,6 @@ void ReachColor::updatePerceptualSchema() {
 }
 
 bool ReachColor::checkInternalReleaser() {
-    std::cout << "isTargetVisible: " << isTargetVisible_ << " name: " << getUniqueID() << std::endl;
     return isTargetVisible_;
 }
 

@@ -19,7 +19,7 @@
 
     BT::PortsList AvoidObstacles::providedPorts(){
         BT::PortsList ports = {
-            BT::InputPort<std::string>("ObjectPath")
+            BT::InputPort<std::string>("Object")
         };
         auto basePorts = AttentionalBehavior::providedPorts();
         ports.insert(basePorts.begin(), basePorts.end());
@@ -53,7 +53,7 @@
 
     void AvoidObstacles::updatePerceptualSchema() {
         std::string path;
-        getInput("ObjectPath", path);
+        getInput("Object", path);
         if (path != previousPath_) {
             targetHandle_ = -1;
             if (path.empty())

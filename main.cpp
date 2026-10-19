@@ -41,7 +41,6 @@ int main(int argc, char** argv) {
     int64_t rightMotor = sim.sim().getObjectHandle("/PioneerP3DX/rightMotor");
     int64_t robot      = sim.sim().getObjectHandle("/PioneerP3DX");
     int64_t camera     = sim.sim().getObjectHandle("/PioneerP3DX/visionSensor");
-    std::cout << "camerahandle main: " << camera << std::endl;
     SharedPerception::get().setup(&sim, robot, camera);
 
     auto cubes = randomizeCubes(sim, seed,
@@ -57,7 +56,6 @@ int main(int argc, char** argv) {
         std::string cleanName = c.path.substr(1);         
         blackboard->set(cleanName + "_x", c.x);
         blackboard->set(cleanName + "_y", c.y);
-        std::cout << "Object gotoxy: " << cleanName << "(x,y): " << "("<< c.x << "," << c.y << ")" << std::endl;
     }
     int64_t billHandle = sim.sim().getObjectHandle("/Bill");
     auto posBill = sim.sim().getObjectPosition(billHandle, -1);

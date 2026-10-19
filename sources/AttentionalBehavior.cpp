@@ -61,13 +61,13 @@ void AttentionalBehavior::halt(){
 }
 
 std::string AttentionalBehavior::getUniqueID() const {
-    std::string obj, color, tgt, place;
-    getInput("ObjectPath", obj); getInput("Color", color);
-    getInput("TargetID", tgt);  getInput("Target", place);
+    std::string obj, color, target, place;
+    getInput("Object", obj); getInput("Color", color);
+    getInput("Object", target);  getInput("Target", place);
     if (!exclusive()) return name() + "_" + (obj == "/Bill" ? obj : "");
     std::string id = name();
     if (obj == "/Bill") id += "_/Bill";
-    else if (!tgt.empty()) id += "_" + tgt;
+    else if (!target.empty()) id += "_" + target;
     if (!color.empty()) id += "_" + color;
     if (!place.empty()) id += "_" + place;
     return id;

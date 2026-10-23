@@ -32,6 +32,7 @@ public:
     bool checkExternalReleaser() override;
     void updatePerceptualSchema() override;
     void afterPropose() override { SharedPerception::get().offerGoal(targetHandle_, emphasis_); }
+    bool accomplishesTask() const override { return true; }
     std::pair<double, double> executeMotorSchema() override;
 };
 

@@ -21,6 +21,7 @@ public:
     bool checkExternalReleaser() override;
     void updatePerceptualSchema() override;
     std::pair<double, double> executeMotorSchema() override;
+    bool accomplishesTask() const override { return true; }
 };
 
 #endif // GOTO_XY_H

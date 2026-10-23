@@ -1,0 +1,150 @@
+<root BTCPP_format="4" main_tree_to_execute="MainTree1">
+
+<BehaviorTree ID="MainTree1">
+  <Sequence>
+
+    <RunOnce>
+      <Script code="mu_t1_1 := 2.0; mu_t1_2 := 1.0; mu_t1_3 := 1.0; mu_t1_4 := 1.0;
+                    mu_t2_1 := 2.0; mu_t2_2 := 1.0; mu_t2_3 := 1.0; mu_t2_4 := 1.0;" />
+    </RunOnce>
+
+    <Parallel failure_count="1" success_count="2">
+      <SubTree ID="Task1" _autoremap="true" />
+      <SubTree ID="Task2" _autoremap="true" />
+    </Parallel>
+  </Sequence>
+</BehaviorTree>
+
+
+<BehaviorTree ID="Task1">
+  <Parallel failure_count="4" success_count="4">
+    <SubTree ID="Take"   Object="/YellowCube" Color="Yellow" X="{YellowCube_x}" Y="{YellowCube_y}" Done="{done_yellow}"   mu="{mu_t1_1}" _autoremap="true"
+             _onSuccess="mu_t1_2 := mu_t1_2 + 1.0" />
+    <SubTree ID="Take"   Object="/OrangeCube" Color="Orange" X="{OrangeCube_x}" Y="{OrangeCube_y}" Done="{done_orange}"   mu="{mu_t1_2}" _autoremap="true"
+             _onSuccess="mu_t1_3 := mu_t1_3 + 1.0" />
+    <SubTree ID="Return" Object="/YellowCube" Color="Yellow" X="{Bill_x}"       Y="{Bill_y}"       Done="{done_yellow}"   Placed="{placed_yellow}" mu="{mu_t1_3}" _autoremap="true"
+             _onSuccess="mu_t1_4 := mu_t1_4 + 1.0" />
+    <SubTree ID="Return" Object="/OrangeCube" Color="Orange" X="{Bill_x}"       Y="{Bill_y}"       Done="{done_orange}"   Placed="{placed_orange}" mu="{mu_t1_4}" _autoremap="true" />
+  </Parallel>
+</BehaviorTree>
+
+<BehaviorTree ID="Task2">
+  <Parallel failure_count="4" success_count="4">
+    <SubTree ID="Take"   Object="/GreenCube" Color="Green" X="{GreenCube_x}" Y="{GreenCube_y}"  Done="{done_green}"   mu="{mu_t2_1}" _autoremap="true"
+             _onSuccess="mu_t2_2 := mu_t2_2 + 1.0" />
+    <SubTree ID="Take"   Object="/RedCube"   Color="Red"   X="{RedCube_x}"   Y="{RedCube_y}"    Done="{done_red}"     mu="{mu_t2_2}" _autoremap="true"
+             _onSuccess="mu_t2_3 := mu_t2_3 + 1.0" />
+    <SubTree ID="Return" Object="/GreenCube" Color="Green" X="{Bill_x}"      Y="{Bill_y}"       Done="{done_green}"   Placed="{placed_green}" mu="{mu_t2_3}" _autoremap="true"
+             _onSuccess="mu_t2_4 := mu_t2_4 + 1.0" />
+    <SubTree ID="Return" Object="/RedCube"   Color="Red"   X="{Bill_x}"      Y="{Bill_y}"       Done="{done_red}"     Placed="{placed_red}"   mu="{mu_t2_4}" _autoremap="true" />
+  </Parallel>
+</BehaviorTree>
+
+
+<BehaviorTree ID="Take">
+  <Sequence>
+    <SubTree ID="GoToColor" _autoremap="true"/>
+    <SubTree ID="PickUp"    _autoremap="true"/>
+  </Sequence>
+</BehaviorTree>
+
+<BehaviorTree ID="GoToColor">
+  <SubTree ID="GoToObject" _autoremap="true"/>    
+</BehaviorTree>
+
+<BehaviorTree ID="GoToObject">
+  <Parallel failure_count="2" success_count="1">
+    <SubTree ID="FollowColor" _autoremap="true"/>
+    <ForceFailure>
+      <SubTree ID="ExploreXY" _autoremap="true"/>
+    </ForceFailure>
+  </Parallel>
+</BehaviorTree>
+
+<BehaviorTree ID="FollowColor">
+  <Parallel failure_count="1" success_count="1">
+    
+    <ReactiveSequence>
+    <RunOnce> <Script code="stimuli_avoid := 1"/> </RunOnce>
+      <Script code="lambda_avoid := (stimuli_avoid <= 0.5) ? 0.01 : ((stimuli_avoid >= 1.0) ? 1.0 : (0.01 + 0.99*(stimuli_avoid - 0.5)/(1.0 - 0.5)));
+                    e_avoid := 1.0 / lambda_avoid;
+                    p_avoid := 1.0 / e_avoid" />
+      <AvoidObstacles name="avoid" Object="{Object}" lambda="{lambda_avoid}" emphasis="{e_avoid}" period="{p_avoid}" stimuli="{stimuli_avoid}" />
+    </ReactiveSequence>
+
+    <ReactiveSequence>
+    <RunOnce> <Script code="stimuli_reach := 1"/> </RunOnce>
+      <Script code="lambda_reach := (stimuli_reach <= 1.0) ? 0.01 : ((stimuli_reach >= 10.0) ? 1.0 : (0.01 + 0.99*(stimuli_reach - 1.0)/(10.0 - 1.0)));
+                    e_reach := mu / lambda_reach;
+                    p_reach := 1.0 / e_reach" />
+      <ReachColor name="ReachColor" Color="{Color}" Object="{Object}" knapsack="{knapsack}" Done="{Done}" stimuli="{stimuli_reach}"
+                  mu="{mu}" lambda="{lambda_reach}" emphasis="{e_reach}" period="{p_reach}"
+                  _while="!Done"
+                  _onSuccess="mu := mu + 1.0" />
+    </ReactiveSequence>
+
+  </Parallel>
+</BehaviorTree>
+
+<BehaviorTree ID="ExploreXY">
+  <Parallel failure_count="1" success_count="1">
+    <RunOnce> <Script code="stimuli_avoid := 1"/> </RunOnce>
+    <ReactiveSequence>
+      <Script code="lambda_avoid_xy := (stimuli_avoid <= 0.5) ? 0.01 : ((stimuli_avoid >= 1.0) ? 1.0 : (0.01 + 0.99*(stimuli_avoid - 0.5)/(1.0 - 0.5)));
+                    e_avoid_xy := 1.0 / lambda_avoid_xy;
+                    p_avoid_xy := 1.0 / e_avoid_xy" />
+      <AvoidObstacles name="avoid" Object="{Object}" lambda="{lambda_avoid_xy}" emphasis="{e_avoid_xy}" period="{p_avoid_xy}" stimuli="{stimuli_avoid}" />
+    </ReactiveSequence>
+
+    <ReactiveSequence>
+      <RunOnce> <Script code="stimuli_xy := 1"/> </RunOnce>
+      <Script code="lambda_xy := (stimuli_xy <= 1.0) ? 0.01 : ((stimuli_xy >= 10.0) ? 1.0 : (0.01 + 0.99*(stimuli_xy - 1.0)/(10.0 - 1.0)));
+                    e_xy := mu / lambda_xy;
+                    p_xy := 1.0 / e_xy" />
+      <GoToXY name="GoToXY" X="{X}" Y="{Y}" Object="{Object}" Done="{Done}"
+              mu="{mu}" lambda="{lambda_xy}" emphasis="{e_xy}" period="{p_xy}" stimuli="{stimuli_xy}"
+              _onSuccess="mu := mu + 1.0" />
+    </ReactiveSequence>
+
+    <ReactiveSequence>
+      <Script code="lambda_wander := 1.0;
+                    e_wander := 1.0 / lambda_wander;
+                    p_wander := 1.0 / e_wander" />
+      <Wander name="wander" lambda="{lambda_wander}" emphasis="{e_wander}" period="{p_wander}" />
+    </ReactiveSequence>
+
+  </Parallel>
+</BehaviorTree>
+
+<BehaviorTree ID="PickUp">
+  <ReactiveSequence>
+    <RunOnce> <Script code="stimuli_pick := 1"/> </RunOnce>
+    <Script code="lambda_pick := (stimuli_pick <= 0.5) ? 0.01 : ((stimuli_pick >= 1.0) ? 1.0 : (0.01 + 0.99*(stimuli_pick - 0.5)/(1.0 - 0.5)));
+                  e_pick := mu / lambda_pick;
+                  p_pick := 1.0 / e_pick" />
+    <Place Object="{Object}" Color="{Color}" Target="knapsack" knapsack="{knapsack}" Done="{Done}" stimuli="{stimuli_pick}" 
+           mu="{mu}" lambda="{lambda_pick}" emphasis="{e_pick}" period="{p_pick}"
+           _onSuccess="mu := mu + 1.0; Done := true" />  
+  </ReactiveSequence>
+</BehaviorTree>
+
+<BehaviorTree ID="Return">
+  <Sequence>
+    <SubTree ID="GoToObject" Object="/Bill" _autoremap="true"/>
+    <SubTree ID="PutDown"    _autoremap="true"/>
+  </Sequence>
+</BehaviorTree>
+
+<BehaviorTree ID="PutDown">
+  <ReactiveSequence>
+    <RunOnce> <Script code="stimuli_put := 1"/> </RunOnce>
+    <Script code="lambda_put := (stimuli_put <= 0.5) ? 0.01 : ((stimuli_put >= 1.0) ? 1.0 : (0.01 + 0.99*(stimuli_put - 0.5)/(1.0 - 0.5)));
+                  e_put := mu / lambda_put;
+                  p_put := 1.0 / e_put" />
+    <Place Object="{Object}" Color="{Color}" Target="ground" knapsack="{knapsack}" Done="{Placed}" stimuli="{stimuli_put}"
+           mu="{mu}" lambda="{lambda_put}" emphasis="{e_put}" period="{p_put}"
+           _onSuccess="mu := mu + 1.0; Placed := true" />
+  </ReactiveSequence>
+</BehaviorTree>
+
+</root>

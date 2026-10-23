@@ -35,18 +35,18 @@ BT::NodeStatus AttentionalBehavior::tick() {
        const double e = std::max(emphasis_, 1e-3); // altrimenti, a volte, period va a inf
        const double period = 1.0 / e;
        nextActivation_ = now + period;
-
-       std::cout << "[CLOCK] t=" << now << " " << getUniqueID()
-          << " lambda=" << lambda_ << " mu=" << mu_ << " e=" << emphasis_
-          << " p=" << period << std::endl;
+        
+        // std::cout << "[CLOCK] t=" << now << " " << getUniqueID()
+        //    << " lambda=" << lambda_ << " mu=" << mu_ << " e=" << emphasis_
+        //    << " p=" << period << std::endl;
     }
     
-    if (lastStatus_ == BT::NodeStatus::SUCCESS) {
-        if (!accomplished_) {
-              accomplished_ = true;
-              if (accomplishesTask()) taskAccomplished();
-       }
-    } else accomplished_ = false;
+        if (lastStatus_ == BT::NodeStatus::SUCCESS) {
+            if (!accomplished_) {
+                accomplished_ = true;
+                if (accomplishesTask()) taskAccomplished();
+        }
+        } else accomplished_ = false;
        
     if (active_) {
         MotorArbitrator::getInstance().proposeCommand(getUniqueID(), emphasis_, lastVL_, lastVR_, exclusive());

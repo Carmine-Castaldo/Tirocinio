@@ -28,11 +28,14 @@ protected:
     virtual bool accomplishesTask() const { return false; }
     
     void taskAccomplished() {
-        if (accomplished_) return;
-        accomplished_ = true;
         double cur = 1.0;
         getInput("mu", cur); 
-        setOutput("mu", cur + kMuStep);
+        double nextMu = cur + kMuStep; 
+        setOutput("mu", nextMu);
+        
+        std::cout << "  [SOTTO-TASK COMPLETED] Behavior: '" << getUniqueID() 
+                  << "' returned SUCCESS -> magnitude's subtree incremented of +" 
+                  << kMuStep << " (from " << cur << " to " << nextMu << ")" << std::endl;
     }
     
 

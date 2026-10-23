@@ -23,6 +23,8 @@ public:
     bool checkExternalReleaser() override;
     void updatePerceptualSchema() override;
     std::pair<double, double> executeMotorSchema() override;
+    virtual bool accomplishesTask() const { return true; }
+
 
 };
 

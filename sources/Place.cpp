@@ -79,7 +79,7 @@
             if (it != knapsack.end()) {
                 knapsack.erase(it);
             }
-            setOutput("Done", false);
+            setOutput("Done", true);
             setOutput("knapsack", knapsack);
         }
         

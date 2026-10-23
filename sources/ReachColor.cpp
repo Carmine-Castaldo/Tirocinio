@@ -112,7 +112,6 @@ bool ReachColor::checkInternalReleaser() {
     return isTargetVisible_;
 }
 
-
 bool ReachColor::checkExternalReleaser() {
     bool isDone = false;
     getInput("Done", isDone);

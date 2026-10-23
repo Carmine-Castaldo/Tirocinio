@@ -17,8 +17,6 @@ void MotorArbitrator::reset() {
     winningVRight_ = 0.0;
 }
 
-
-
 void MotorArbitrator::proposeCommand(const std::string& id, double e,
                                      double vL, double vR, bool exclusive) {
     if (e <= 0.0) return;

@@ -39,10 +39,9 @@ bool MotorArbitrator::getWinningCommand(double& vLeft, double& vRight, std::stri
 
 void MotorArbitrator::applyCommand(RemoteAPIObjects* sim, int64_t leftMotor, int64_t rightMotor) {
     const Proposal* win = nullptr;
+    
     for (auto& p : proposals_)
         if (p.exclusive && (!win || p.emphasis > win->emphasis)) win = &p;
-        //sceglie tra le proposte exclusive (nodi che non possono essere sovrapposti, risuluzione dei conflitti)
-        //quello con l'enfasi più alta 
     std::unordered_map<std::string, const Proposal*> uniq;
     for (auto& p : proposals_)
         if (!p.exclusive) { auto& s = uniq[p.id]; if (!s || p.emphasis > s->emphasis) s = &p; }
@@ -61,6 +60,7 @@ void MotorArbitrator::applyCommand(RemoteAPIObjects* sim, int64_t leftMotor, int
 
     if (winner != previousWinner_) {
             previousWinner_ = winner;
+            std::cout << "[MOTOR ARBITRATOR] winner changed, new winner: " << win->id << " | emphasis: " << win->emphasis << std::endl;
             try { sim->sim().setStringSignal("active_behavior", winner); } catch (...) {}
         }
     if (sim != nullptr && leftMotor >= 0 && rightMotor >= 0) {

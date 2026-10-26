@@ -57,7 +57,7 @@ public:
                     std::cout << "[" << taskName_ << " - START] Priorizited Mangitude To First Behavior In Sequence: "
                               << sequence_[firstUnfinishedIdx].name << " (mu: " << currentMu << " -> " << newMu << ")" << std::endl;
                 } else {
-                    std::cout << "[" << taskName_ << " - STEP TERMINATO] Incremented Magnitude To Next Behavior In Sequence: "
+                    std::cout << "[" << taskName_ << " - STEP TERMINATED] Incremented Magnitude To Next Behavior In Sequence: "
                               << sequence_[firstUnfinishedIdx].name << " (magnitude: " << currentMu << " -> " << newMu << ")" << std::endl;
                 }
                 std::cout << "----------------------------------------------------------------" << std::endl;

@@ -1,63 +1,32 @@
-#ifndef ATTENTIONAL_BEHAVIOR_H
-#define ATTENTIONAL_BEHAVIOR_H
-
+#pragma once
 #include <behaviortree_cpp/action_node.h>
+#include "SharedPerception.h"
 #include "MotorArbitrator.h"
-#include <cmath>
-#include <string>
-#include <utility>
 
 class AttentionalBehavior : public BT::ActionNodeBase {
 protected:
-    double mu_ = 1.0;
-    double lambda_ = 1.0;
-    double emphasis_ = 0.0;
-    int64_t drawHandle_ = -1;
-    bool active_ = false, accomplished_= false;
-    static constexpr double kMuStep = 1.0;   
-    double nextActivation_ = 0.0;
-    double lastVL_ = 0.0, lastVR_ = 0.0;
-    BT::NodeStatus lastStatus_ = BT::NodeStatus::RUNNING;
-    virtual void afterPropose() {};
-    static double saturatingLambda(double s, double rmin, double rmax,
-                               double lmin = 0.01, double lmax = 1.0) {
-        if (s <= rmin) return lmin;
-        if (s >= rmax) return lmax;
-        return lmin + (lmax - lmin) * (s - rmin) / (rmax - rmin);
-    }
-    virtual bool accomplishesTask() const { return false; }
+    double emphasis_ = 1.0;
+    double period_ = 1.0;
+    double nextActivation_ = 0.0, lastActivation_ = -1e9;
     
-    void taskAccomplished() {
-        double cur = 1.0;
-        getInput("mu", cur); 
-        double nextMu = cur + kMuStep; 
-        setOutput("mu", nextMu);
-        
-        std::cout << "  [SOTTO-TASK COMPLETED] Behavior: '" << getUniqueID() 
-                  << "' returned SUCCESS -> magnitude's subtree incremented of +" 
-                  << kMuStep << " (from " << cur << " to " << nextMu << ")" << std::endl;
-    }
+    double lastVL_ = 0.0;
+    double lastVR_ = 0.0;
     
+    bool active_ = false;
 
 public:
     AttentionalBehavior(const std::string& name, const BT::NodeConfig& config);
 
     static BT::PortsList providedPorts();
 
-    virtual bool checkInternalReleaser() = 0;
-    virtual bool checkExternalReleaser() = 0;
-    virtual void updatePerceptualSchema() = 0;
+    virtual double readSensors() = 0; 
     virtual std::pair<double, double> executeMotorSchema() = 0;
-    std::string getUniqueID() const;
-
+    
+    virtual bool checkInternalReleaser() { return true; } 
+    virtual bool exclusive() const { return true; }
+    virtual void afterPropose() {}
     BT::NodeStatus tick() override;
     void halt() override;
-
-    double getEmphasis() const { return emphasis_; }
-    double getLambda() const { return lambda_; }
-    double getMu() const { return mu_; }
-    void setMu(double mu) { mu_ = mu;}
-    virtual bool exclusive() const {return true;}
+    
+    std::string getUniqueID() const;
 };
-
-#endif // ATTENTIONAL_BEHAVIOR_H

@@ -1,31 +1,22 @@
-#ifndef PLACE_H
-#define PLACE_H
-
+#pragma once
 #include "AttentionalBehavior.h"
 #include "RemoteAPIObjects.h"
 #include <string>
-#include <vector>
 
 class Place : public AttentionalBehavior {
 private:
     RemoteAPIObjects* sim_;
-    std::string objectPath_, target_, previousPath_;
-    std::vector<int> knapsack;
+    std::string objectPath_, previousPath_, target_, color_;
     int64_t targetHandle_ = -1;
-    double distance = 999.0;
+    double distance_ = 999.0;
+    std::vector<int> knapsack;
 
 public:
-    Place(const std::string& name, const BT::NodeConfig& config, RemoteAPIObjects* sim_);
+    Place(const std::string& name, const BT::NodeConfig& config, RemoteAPIObjects* sim);
 
     static BT::PortsList providedPorts();
 
+    double readSensors() override;
     bool checkInternalReleaser() override;
-    bool checkExternalReleaser() override;
-    void updatePerceptualSchema() override;
     std::pair<double, double> executeMotorSchema() override;
-    virtual bool accomplishesTask() const { return true; }
-
-
 };
-
-#endif // PLACE_H

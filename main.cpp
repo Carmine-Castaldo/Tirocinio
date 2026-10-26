@@ -71,8 +71,7 @@ int main(int argc, char** argv) {
     bool havePrev = false;
     BT::NodeStatus st;
 
-    // Lo stepping è solo un modo per ''cozzare'' meglio l'esecuzione dell'albero e del codice con il simulatore
-    // il simulatore avanza nel tempo solo quando viene invocato client.step()
+    
     while (true) {
         SharedPerception::get().newTick();
         sim.sim().handleVisionSensor(camera); 

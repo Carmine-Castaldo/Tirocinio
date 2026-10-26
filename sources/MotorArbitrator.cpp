@@ -63,6 +63,7 @@ void MotorArbitrator::applyCommand(RemoteAPIObjects* sim, int64_t leftMotor, int
 
     if (winner != previousWinner_) {
             previousWinner_ = winner;
+            std::cout << "[Motor Arbitrator] Winner: " << winner << std::endl;
             try { sim->sim().setStringSignal("active_behavior", winner); } catch (...) {}
         }
     if (sim != nullptr && leftMotor >= 0 && rightMotor >= 0) {

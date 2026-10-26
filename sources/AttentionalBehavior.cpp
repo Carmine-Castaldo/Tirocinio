@@ -36,9 +36,9 @@ BT::NodeStatus AttentionalBehavior::tick() {
        const double period = 1.0 / e;
        nextActivation_ = now + period;
 
-       std::cout << "[CLOCK] t=" << now << " " << getUniqueID()
-          << " lambda=" << lambda_ << " mu=" << mu_ << " e=" << emphasis_
-          << " p=" << period << std::endl;
+    //    std::cout << "[CLOCK] t=" << now << " " << getUniqueID()
+    //       << " lambda=" << lambda_ << " mu=" << mu_ << " e=" << emphasis_
+    //       << " p=" << period << std::endl;
     }
     
     if (lastStatus_ == BT::NodeStatus::SUCCESS) {

@@ -1,0 +1,1566 @@
+===== ./headers/AttentionalBehavior.h =====
+#ifndef ATTENTIONAL_BEHAVIOR_H
+#define ATTENTIONAL_BEHAVIOR_H
+
+#include <behaviortree_cpp/action_node.h>
+#include "MotorArbitrator.h"
+#include <cmath>
+#include <string>
+#include <utility>
+
+class AttentionalBehavior : public BT::ThreadedAction {
+protected:
+    double mu_ = 1.0;
+    double lambda_ = 1.0;
+    double emphasis_ = 0.0;
+    int64_t drawHandle_ = -1;
+    bool active_ = false;
+    bool accomplished_ = false;
+    static constexpr double kMuStep = 1.0;   
+    double nextActivation_ = 0.0;
+    double lastVL_ = 0.0, lastVR_ = 0.0;
+    BT::NodeStatus lastStatus_ = BT::NodeStatus::RUNNING;
+
+    virtual void afterPropose() {}
+
+    static double saturatingLambda(double s, double rmin, double rmax,
+                                   double lmin = 0.01, double lmax = 1.0) {
+        if (s <= rmin) return lmin;
+        if (s >= rmax) return lmax;
+        return lmin + (lmax - lmin) * (s - rmin) / (rmax - rmin);
+    }
+
+    virtual bool accomplishesTask() const { return false; }
+    virtual bool exclusive() const { return true; }
+
+    void taskAccomplished() {
+        if (accomplished_) return;
+        accomplished_ = true;
+        double cur = 1.0;
+        getInput("mu", cur); 
+        setOutput("mu", cur + kMuStep);
+    }
+
+public:
+    AttentionalBehavior(const std::string& name, const BT::NodeConfig& config);
+    virtual ~AttentionalBehavior() override = default;
+
+    static BT::PortsList providedPorts();
+
+    virtual bool checkInternalReleaser() = 0;
+    virtual bool checkExternalReleaser() = 0;
+    virtual void updatePerceptualSchema() = 0;
+    virtual std::pair<double, double> executeMotorSchema() = 0;
+
+    std::string getUniqueID() const;
+
+    BT::NodeStatus tick() override;
+    void halt() override;
+};
+
+#endif // ATTENTIONAL_BEHAVIOR_H
+===== ./headers/AvoidObstacles.h =====
+#ifndef AVOID_OBSTACLES_H
+#define AVOID_OBSTACLES_H
+
+#include "AttentionalBehavior.h"
+#include "RemoteAPIObjects.h"
+#include <vector>
+
+class AvoidObstacles : public AttentionalBehavior {
+private:
+    RemoteAPIObjects* sim_;
+    std::vector<int64_t> sonarHandles_;
+    std::string target_;
+    int64_t targetHandle_ = -1, robotHandle_;
+    std::vector<double> distances;
+    std::string previousPath_;
+    std::unordered_set<int64_t> ignored_;
+    bool isObstacle = false;
+    bool ignoredValid_ = false;
+    bool isIgnored(int64_t detected);
+    int  turnSign_= 0;
+    double holdUntil_ = 0.0;
+    static constexpr double kHoldSec = 1.0;
+    static constexpr int kHold = 20;
+    std::vector<double> lastDistances_;
+    std::vector<int> sonarSide_;
+
+    double lastMinDist_ = 1.0;
+
+public:
+    AvoidObstacles(const std::string& name, const BT::NodeConfig& config, RemoteAPIObjects* sim);
+
+    static BT::PortsList providedPorts();
+
+    bool checkInternalReleaser() override;
+    bool checkExternalReleaser() override;
+    void updatePerceptualSchema() override;
+    std::pair<double, double> executeMotorSchema() override;
+    double checkSonar(int64_t sonarHandle);
+    bool exclusive() const override {return false;} 
+};
+
+
+#endif // AVOID_OBSTACLES_H
+===== ./headers/DecisionLogger.h =====
+#pragma once
+#include <fstream>
+#include <iomanip>
+#include <string>
+#include <utility>
+#include <vector>
+
+class DecisionLogger {
+public:
+    static DecisionLogger& get() { static DecisionLogger l; return l; }
+
+    void open(const std::string& path) {
+        out_.open(path, std::ios::out | std::ios::trunc);
+        if (out_.is_open()) out_ << "t,winner,e_winner,competitors\n";
+    }
+
+    void log(double t, const std::string& winner, double eWinner,
+             const std::vector<std::pair<std::string, double>>& competitors) {
+        if (!out_.is_open()) return;
+        out_ << std::fixed << std::setprecision(2) << t << ',' << winner << ',' << eWinner << ",\"";
+        for (size_t i = 0; i < competitors.size(); ++i) {
+            if (i) out_ << ';';
+            out_ << competitors[i].first << '=' << competitors[i].second;
+        }
+        out_ << "\"\n";
+    }
+
+    void close() { if (out_.is_open()) out_.close(); }
+
+private:
+    std::ofstream out_;
+};
+===== ./headers/GoToXY.h =====
+#ifndef GOTO_XY_H
+#define GOTO_XY_H
+
+#include "AttentionalBehavior.h"
+#include "RemoteAPIObjects.h"
+
+class GoToXY : public AttentionalBehavior {
+private:
+    RemoteAPIObjects* sim_;
+    double targetX_ = 0.0;
+    double targetY_ = 0.0;
+    int64_t robotHandle_ = -1;
+    double dist_ = 999.0, angleError_ = 0.0;
+
+public:
+    GoToXY(const std::string& name, const BT::NodeConfig& config, RemoteAPIObjects* sim);
+
+    static BT::PortsList providedPorts();
+
+    bool checkInternalReleaser() override;
+    bool checkExternalReleaser() override;
+    void updatePerceptualSchema() override;
+    std::pair<double, double> executeMotorSchema() override;
+};
+
+#endif // GOTO_XY_H
+===== ./headers/MotorArbitrator.h =====
+#ifndef MOTOR_ARBITRATOR_H
+#define MOTOR_ARBITRATOR_H
+
+#include <string>
+#include <vector>
+#include <map>
+#include <mutex>
+#include <iostream>
+#include "RemoteAPIObjects.h"
+
+struct Proposal {
+    std::string id;
+    double emphasis;
+    double vL;
+    double vR;
+    bool exclusive;
+};
+
+class MotorArbitrator {
+private:
+    std::string previousWinner_ = "none";
+    std::string currentWinner_ = "none";
+    double maxEmphasis_ = -1.0;
+    double winningVLeft_ = 0.0;
+    double winningVRight_ = 0.0;
+
+    mutable std::mutex m_;
+    std::map<uint64_t, Proposal> props_;
+    std::vector<Proposal> proposals_; 
+
+    MotorArbitrator() = default;
+
+public:
+    static MotorArbitrator& getInstance();
+
+    void reset();
+    void propose(uint64_t key, const std::string& id, double e, double vL, double vR, bool exclusive);
+    void withdraw(uint64_t key);
+
+    bool getWinningCommand(double& vLeft, double& vRight, std::string& winnerName, double& winnerEmphasis) const;
+    void applyCommand(RemoteAPIObjects* sim, int64_t leftMotor, int64_t rightMotor);
+};
+
+#endif // MOTOR_ARBITRATOR_H
+===== ./headers/Place.h =====
+#ifndef PLACE_H
+#define PLACE_H
+
+#include "AttentionalBehavior.h"
+#include "RemoteAPIObjects.h"
+#include <string>
+#include <vector>
+
+class Place : public AttentionalBehavior {
+private:
+    RemoteAPIObjects* sim_;
+    std::string objectPath_, target_, previousPath_;
+    std::vector<int> knapsack;
+    int64_t targetHandle_ = -1;
+    double distance = 999.0;
+
+public:
+    Place(const std::string& name, const BT::NodeConfig& config, RemoteAPIObjects* sim_);
+
+    static BT::PortsList providedPorts();
+
+    bool checkInternalReleaser() override;
+    bool checkExternalReleaser() override;
+    void updatePerceptualSchema() override;
+    std::pair<double, double> executeMotorSchema() override;
+
+};
+
+#endif // PLACE_H
+
+===== ./headers/ReachColor.h =====
+#ifndef REACH_COLOR_H
+#define REACH_COLOR_H
+
+#include "AttentionalBehavior.h"
+#include "SharedPerception.h"
+#include "RemoteAPIObjects.h"
+#include <string>
+#include <cmath>
+#include <algorithm>
+
+class ReachColor : public AttentionalBehavior {
+private:
+    RemoteAPIObjects* sim_;
+    std::string color_, target_, previousTarget_;
+    std::vector<int> knapsack;
+    double distance_, relX_ = 0, relY_ = 0;
+    int64_t robotHandle_ = -1, targetHandle_ = -1;
+    bool isTargetVisible_ = false, tracking_ = false;
+    static constexpr double kDepthBg = 0.999;
+    static constexpr double kFovDeg = 60.0;
+    static constexpr double kNear = 0.05;
+    static constexpr double kFar = 10.0;
+    int64_t resolveTarget();
+    bool isObjectInKnapsack();
+
+public:
+    ReachColor(const std::string& name, const BT::NodeConfig& config, RemoteAPIObjects* sim);
+
+    static BT::PortsList providedPorts();
+    bool checkInternalReleaser() override;
+    bool checkExternalReleaser() override;
+    void updatePerceptualSchema() override;
+    void afterPropose() override { SharedPerception::get().offerGoal(UID(), targetHandle_, emphasis_); }
+    std::pair<double, double> executeMotorSchema() override;
+};
+
+#endif // REACH_COLOR_H
+===== ./headers/SharedPerception.h =====
+#pragma once
+#include <chrono>
+#include <condition_variable>
+#include <functional>
+#include <memory>
+#include <mutex>
+#include <string>
+#include <tuple>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
+#include "RemoteAPIObjects.h"
+
+
+class SharedPerception {
+public:
+    using Sonar = std::tuple<int64_t, double, std::vector<double>, int64_t, std::vector<double>>;
+
+    static SharedPerception& get() { static SharedPerception s; return s; }
+
+    void setup(RemoteAPIObjects* sim, int64_t robot, int64_t camera) {
+        std::lock_guard<std::recursive_mutex> l(m_);
+        sim_ = sim; robot_ = robot; camera_ = camera;
+    }
+
+    template <class F>
+    auto exec(F&& f) {
+        std::lock_guard<std::recursive_mutex> l(m_);
+        return f(*sim_);
+    }
+
+    void newTick() {
+        std::lock_guard<std::recursive_mutex> l(m_);
+        poseOk_ = false; treeOk_ = false; timeOk_ = false;
+        sonar_.clear();
+        goal_ = -1;
+        double bestE = -1.0;
+        for (const auto& kv : offers_)
+            if (kv.second.second > bestE) { bestE = kv.second.second; goal_ = kv.second.first; }
+        ++seq_;
+        done_ = 0;
+        cv_.notify_all();
+    }
+
+    void wake() { cv_.notify_all(); }
+
+    bool waitNextTick(uint64_t& seen, const std::function<bool()>& stop) {
+        std::unique_lock<std::recursive_mutex> lk(m_);
+        cv_.wait_for(lk, std::chrono::milliseconds(20), [&] { return seq_ > seen || stop(); });
+        if (seq_ > seen) { seen = seq_; return true; }
+        return false;
+    }
+
+    void registerWorker()   { std::lock_guard<std::recursive_mutex> l(m_); ++workers_; }
+    void unregisterWorker() { std::lock_guard<std::recursive_mutex> l(m_); --workers_; cvDone_.notify_all(); }
+    void workerDone()       { std::lock_guard<std::recursive_mutex> l(m_); ++done_; cvDone_.notify_all(); }
+    void waitWorkersDone(std::chrono::milliseconds timeout = std::chrono::milliseconds(200)) {
+        std::unique_lock<std::recursive_mutex> lk(m_);
+        cvDone_.wait_for(lk, timeout, [&] { return done_ >= workers_; });
+    }
+
+    std::vector<double> position() {
+        std::lock_guard<std::recursive_mutex> l(m_);
+        refreshPose();
+        return pos_;
+    }
+    std::vector<double> orientation() {
+        std::lock_guard<std::recursive_mutex> l(m_);
+        refreshPose();
+        return ori_;
+    }
+    int64_t cameraHandle() {
+        std::lock_guard<std::recursive_mutex> l(m_);
+        return camera_;
+    }
+    double time() {
+        std::lock_guard<std::recursive_mutex> l(m_);
+        if (!timeOk_) { t_ = sim_->sim().getSimulationTime(); timeOk_ = true; }
+        return t_;
+    }
+
+    Sonar sonar(int64_t h) {
+        std::lock_guard<std::recursive_mutex> l(m_);
+        auto it = sonar_.find(h);
+        if (it == sonar_.end()) it = sonar_.emplace(h, sim_->sim().readProximitySensor(h)).first;
+        return it->second;
+    }
+
+    bool inRobotTree(int64_t h) {
+        std::lock_guard<std::recursive_mutex> l(m_);
+        if (!treeOk_) {
+            tree_.clear();
+            for (auto x : sim_->sim().getObjectsInTree(robot_)) tree_.insert(x);
+            treeOk_ = true;
+        }
+        return tree_.count(h) > 0;
+    }
+
+    std::shared_ptr<const std::vector<unsigned char>> image() {
+        std::lock_guard<std::recursive_mutex> l(m_);
+        if (imgSeq_ != seq_ || !img_) {
+            auto r = sim_->sim().getVisionSensorImg(camera_);
+            const auto& v = std::get<0>(r);
+            img_ = std::make_shared<std::vector<unsigned char>>(v.begin(), v.end());
+            imgSeq_ = seq_;
+        }
+        return img_;
+    }
+
+    int64_t handle(const std::string& path) {
+        std::lock_guard<std::recursive_mutex> l(m_);
+        auto it = handles_.find(path);
+        if (it != handles_.end()) return it->second;
+        const int64_t h = sim_->sim().getObjectHandle(path);
+        handles_[path] = h;
+        return h;
+    }
+
+    std::vector<double> objectPosition(int64_t h, int64_t relativeTo) {
+        std::lock_guard<std::recursive_mutex> l(m_);
+        return sim_->sim().getObjectPosition(h, relativeTo);
+    }
+
+    double distanceTo(const std::string& path) {
+        std::lock_guard<std::recursive_mutex> l(m_);
+        return sim_->getDistanceTo(path);
+    }
+
+    void offerGoal(uint64_t key, int64_t h, double e) {
+        std::lock_guard<std::recursive_mutex> l(m_);
+        if (h >= 0) offers_[key] = {h, e};
+    }
+    void withdrawGoal(uint64_t key) {
+        std::lock_guard<std::recursive_mutex> l(m_);
+        offers_.erase(key);
+    }
+    bool isGoal(int64_t det) {
+        std::lock_guard<std::recursive_mutex> l(m_);
+        if (goal_ < 0 || det < 0) return false;
+        if (det == goal_) return true;
+        if (goalTreeFor_ != goal_) {
+            goalTree_.clear();
+            try { for (auto x : sim_->sim().getObjectsInTree(goal_)) goalTree_.insert(x); } catch (...) {}
+            goalTreeFor_ = goal_;
+        }
+        return goalTree_.count(det) > 0;
+    }
+
+private:
+    SharedPerception() = default;
+
+    void refreshPose() { 
+        if (poseOk_) return;
+        pos_ = sim_->sim().getObjectPosition(robot_, -1);
+        ori_ = sim_->sim().getObjectOrientation(robot_, -1);
+        poseOk_ = true;
+    }
+
+    std::recursive_mutex m_;
+    std::condition_variable_any cv_, cvDone_;
+    uint64_t seq_ = 0;
+    int workers_ = 0, done_ = 0;
+
+    RemoteAPIObjects* sim_ = nullptr;
+    int64_t robot_ = -1, camera_ = -1;
+
+    bool poseOk_ = false, treeOk_ = false, timeOk_ = false;
+    std::vector<double> pos_, ori_;
+    double t_ = 0.0;
+    std::unordered_map<int64_t, Sonar> sonar_;
+    std::unordered_set<int64_t> tree_;
+
+    std::shared_ptr<std::vector<unsigned char>> img_;
+    uint64_t imgSeq_ = 0;
+    std::unordered_map<std::string, int64_t> handles_;
+    std::unordered_map<uint64_t, std::pair<int64_t, double>> offers_;
+    std::unordered_set<int64_t> goalTree_;
+    int64_t goal_ = -1, goalTreeFor_ = -2;
+};
+===== ./headers/TrialSetup.h =====
+#pragma once
+#include <cmath>
+#include <random>
+#include <stdexcept>
+#include <string>
+#include <vector>
+#include "RemoteAPIObjects.h"
+
+inline unsigned& trialSeed() { static unsigned s = 1; return s; }
+
+struct CubePose { std::string path; double x, y; };
+
+inline std::vector<CubePose> randomizeCubes(RemoteAPIObjects& sim, unsigned seed,
+                                            const std::vector<std::string>& cubePaths,
+                                            const std::vector<std::string>& keepOutPaths,
+                                            double half = 6.5,
+                                            double minCubeDist = 1.5,
+                                            double minKeepOut = 2.0)
+{
+    std::mt19937 rng(seed);
+    std::uniform_real_distribution<double> U(-half, half);
+
+    std::vector<std::pair<double, double>> keep;
+    for (const auto& p : keepOutPaths) {
+        auto pos = sim.sim().getObjectPosition(sim.sim().getObjectHandle(p), -1);
+        keep.emplace_back(pos[0], pos[1]);
+    }
+
+    std::vector<CubePose> placed;
+    for (const auto& path : cubePaths) {
+        int64_t h = sim.sim().getObjectHandle(path);
+        auto cur = sim.sim().getObjectPosition(h, -1);
+        bool ok = false;
+        for (int attempt = 0; attempt < 2000 && !ok; ++attempt) {
+            const double x = U(rng), y = U(rng);
+            ok = true;
+            for (const auto& k : keep)   if (std::hypot(x - k.first, y - k.second) < minKeepOut) ok = false;
+            for (const auto& c : placed) if (std::hypot(x - c.x, y - c.y) < minCubeDist)         ok = false;
+            if (ok) {
+                placed.push_back({path, x, y});
+                sim.sim().setObjectPosition(h, -1, {x, y, cur[2]});
+            }
+        }
+        if (!ok) throw std::runtime_error("randomizeCubes: nessuna posizione valida per " + path);
+    }
+    return placed;
+}
+===== ./headers/Wander.h =====
+#ifndef WANDER_H
+#define WANDER_H
+
+#include "AttentionalBehavior.h"
+#include "RemoteAPIObjects.h"
+#include <random>
+
+class Wander : public AttentionalBehavior {
+private:
+    RemoteAPIObjects* sim_;
+    double targetX_ = 0.0;
+    double targetY_ = 0.0;
+    double current_dist_ = 999.0;
+    int64_t robotHandle_ = -1;
+    double angleError_ = 0.0;
+    double retargetAt_ = 0.0;
+
+    std::mt19937 rng_{std::random_device{}()};
+    std::uniform_real_distribution<double> dist_{-6.0, 6.0};
+public:
+    Wander(const std::string& name, const BT::NodeConfig& config, RemoteAPIObjects* sim);
+
+    static BT::PortsList providedPorts();
+
+    bool checkInternalReleaser() override;
+    bool checkExternalReleaser() override;
+    void updatePerceptualSchema() override;
+    std::pair<double, double> executeMotorSchema() override;
+};
+
+#endif // WANDER_H
+===== ./main.cpp =====
+#include <cmath>
+#include <fstream>
+#include <iostream>
+#include <string>
+
+#include "ReachColor.h"
+#include "AvoidObstacles.h"
+#include "Wander.h"
+#include "GoToXY.h"
+#include "Place.h"
+#include "MotorArbitrator.h"
+#include "SharedPerception.h"
+#include "TrialSetup.h"
+#include "DecisionLogger.h"
+#include <behaviortree_cpp/bt_factory.h>
+#include <behaviortree_cpp/loggers/bt_observer.h>
+
+#include "RemoteAPIClient.h"
+#include "RemoteAPIObjects.h"
+
+struct Handles {
+    int64_t robot      = -1;
+    int64_t leftMotor  = -1;
+    int64_t rightMotor = -1;
+    int64_t camera     = -1;
+    int64_t bill       = -1;
+
+    static Handles init(SharedPerception& sp) {
+        Handles h;
+        h.robot      = sp.handle("/PioneerP3DX");
+        h.leftMotor  = sp.handle("/PioneerP3DX/leftMotor");
+        h.rightMotor = sp.handle("/PioneerP3DX/rightMotor");
+        h.camera     = sp.handle("/PioneerP3DX/visionSensor");
+        h.bill       = sp.handle("/Bill");
+        return h;
+    }
+};
+
+
+int main(int argc, char** argv) {
+    const unsigned seed   = (argc > 1) ? static_cast<unsigned>(std::stoul(argv[1])) : 1;
+    const std::string out = (argc > 2) ? argv[2] : "results";
+    const double maxT     = (argc > 3) ? std::stod(argv[3]) : 900.0;
+    trialSeed() = seed;
+
+    RemoteAPIClient client("127.0.0.1", 23000);
+    RemoteAPIObjects sim(&client);
+    client.setStepping(true);
+
+    BT::BehaviorTreeFactory factory;
+    factory.registerNodeType<AvoidObstacles>("AvoidObstacles", &sim);
+    factory.registerNodeType<ReachColor>("ReachColor", &sim);
+    factory.registerNodeType<GoToXY>("GoToXY", &sim);
+    factory.registerNodeType<Place>("Place", &sim);
+    factory.registerNodeType<Wander>("Wander", &sim);
+    auto tree = factory.createTreeFromFile("../plan/case1.xml");
+    BT::TreeObserver observer(tree); 
+    int64_t leftMotor  = sim.sim().getObjectHandle("/PioneerP3DX/leftMotor");
+    int64_t rightMotor = sim.sim().getObjectHandle("/PioneerP3DX/rightMotor");
+    int64_t robot      = sim.sim().getObjectHandle("/PioneerP3DX");
+    int64_t camera     = sim.sim().getObjectHandle("/PioneerP3DX/visionSensor");
+    auto& sp = SharedPerception::get();
+    sp.setup(&sim, robot, camera);
+    Handles handles = Handles::init(sp);
+
+    sp.setup(&sim, handles.robot, handles.camera);
+
+    auto cubes = randomizeCubes(sim, seed,
+                                {"/GreenCube", "/RedCube", "/YellowCube", "/OrangeCube"},
+                                {"/PioneerP3DX", "/Bill"});
+    {
+        std::ofstream f(out + "/cubes_seed" + std::to_string(seed) + ".csv");
+        f << "cube,x,y\n";
+        for (const auto& c : cubes) f << c.path << ',' << c.x << ',' << c.y << '\n';
+    }
+    auto blackboard = tree.rootBlackboard();
+    for (const auto& c : cubes) {
+        std::string cleanName = c.path.substr(1);         
+        blackboard->set(cleanName + "_x", c.x);
+        blackboard->set(cleanName + "_y", c.y);
+    }
+    int64_t billHandle = sim.sim().getObjectHandle("/Bill");
+    auto posBill = sim.sim().getObjectPosition(billHandle, -1);
+    blackboard->set("Bill_x", posBill[0]);
+    blackboard->set("Bill_y", posBill[1]);
+    DecisionLogger::get().open(out + "/decisions_seed" + std::to_string(seed) + ".csv");
+
+    sim.sim().startSimulation();
+    client.step();
+
+    std::string result = "TIMEOUT";
+    double pathLen = 0.0, px = 0.0, py = 0.0;
+    bool havePrev = false;
+    BT::NodeStatus st;
+
+
+    while (true) {
+        sp.exec([&](RemoteAPIObjects& s){ s.sim().handleVisionSensor(handles.camera); });
+        sp.newTick();
+        const double t = sp.time();
+        const auto pos = sp.position();
+        if (havePrev) pathLen += std::hypot(pos[0]-px, pos[1]-py);
+        px = pos[0]; py = pos[1]; havePrev = true;
+
+        BT::NodeStatus st;
+        try { st = tree.tickExactlyOnce(); }
+        catch (const std::exception& e) { std::cout << "[BT ERROR] " << e.what() << std::endl; result = "ERROR"; break; }
+        sp.waitWorkersDone(std::chrono::milliseconds(200));
+        sp.exec([&](RemoteAPIObjects&){ MotorArbitrator::getInstance().applyCommand(&sim, handles.leftMotor, handles.rightMotor); });
+        sp.exec([&](RemoteAPIObjects&){ client.step(); });
+        if (st != BT::NodeStatus::RUNNING) { result = (st == BT::NodeStatus::SUCCESS) ? "SUCCESS" : "FAILURE"; break; }
+        if (t > maxT) break;
+    }
+
+    if (result != "SUCCESS") {
+        std::vector<std::tuple<long long, std::string, unsigned>> rows;
+        tree.applyVisitor([&](const BT::TreeNode* n) {
+            const auto& ns = observer.getStatistics(n->UID());
+            if (ns.last_result == BT::NodeStatus::FAILURE)
+                rows.emplace_back(ns.last_timestamp.count(), n->fullPath(), ns.failure_count);
+        });
+        std::sort(rows.rbegin(), rows.rend());            // i più recenti per primi
+        std::ofstream f(out + "/failures_seed" + std::to_string(seed) + ".txt");
+        for (size_t i = 0; i < rows.size() && i < 15; ++i)
+            f << std::get<0>(rows[i]) << " ms  " << std::get<1>(rows[i])
+            << "  failures=" << std::get<2>(rows[i]) << '\n';
+    }
+
+    const double tEnd = SharedPerception::get().time();
+    tree.haltTree();
+    DecisionLogger::get().close();
+
+    const std::string summary = out + "/summary.csv";
+    const bool exists = std::ifstream(summary).good();
+    std::ofstream s(summary, std::ios::app);
+
+    if (!exists) s << "seed,result,sim_time_s,path_m\n";
+    s << seed << ',' << result << ',' << tEnd << ',' << pathLen << '\n';
+    std::cout << "[TRIAL " << seed << "] " << result << " t=" << tEnd << "s path=" << pathLen << "m\n";
+
+    client.setStepping(false);
+    sim.sim().stopSimulation();
+
+    return 0;
+}
+===== ./plan/case1_seq.xml =====
+<root BTCPP_format="4" main_tree_to_execute="MainTree1">
+
+<BehaviorTree ID="MainTree1">
+  <Parallel failure_count="1" success_count="2">
+    <SubTree ID="Task1" _autoremap="true" />
+    <SubTree ID="Task2" _autoremap="true" />
+  </Parallel>
+</BehaviorTree>
+
+<BehaviorTree ID="Task1">
+<Sequence>
+    <SubTree ID="Take"   Object="/YellowCube" Color="Yellow" X="{YellowCube_x}" Y="{YellowCube_y}" Done="{done_yellow}"   mu="{mu_t1_1}" _autoremap="true"/>
+    <SubTree ID="Take"   Object="/OrangeCube" Color="Orange" X="{OrangeCube_x}" Y="{OrangeCube_y}" Done="{done_orange}"   mu="{mu_t1_2}" _autoremap="true"/>
+    <SubTree ID="Return" Object="/YellowCube" Color="Yellow" X="{Bill_x}"       Y="{Bill_y}"       Done="{done_yellow}"   Placed="{placed_yellow}" mu="{mu_t1_3}" _autoremap="true"/>
+    <SubTree ID="Return" Object="/OrangeCube" Color="Orange" X="{Bill_x}"       Y="{Bill_y}"       Done="{done_orange}"   Placed="{placed_orange}" mu="{mu_t1_4}" _autoremap="true"/>
+</Sequence>
+</BehaviorTree>
+
+<BehaviorTree ID="Task2">
+<Sequence>
+    <SubTree ID="Take"   Object="/GreenCube" Color="Green" X="{GreenCube_x}" Y="{GreenCube_y}"  Done="{done_green}"   mu="{mu_t2_1}" _autoremap="true"/>
+    <SubTree ID="Take"   Object="/RedCube"   Color="Red"   X="{RedCube_x}"   Y="{RedCube_y}"    Done="{done_red}"     mu="{mu_t2_2}" _autoremap="true"/>
+    <SubTree ID="Return" Object="/GreenCube" Color="Green" X="{Bill_x}"      Y="{Bill_y}"       Done="{done_green}"   Placed="{placed_green}" mu="{mu_t2_3}" _autoremap="true"/>
+    <SubTree ID="Return" Object="/RedCube"   Color="Red"   X="{Bill_x}"      Y="{Bill_y}"       Done="{done_red}"     Placed="{placed_red}"   mu="{mu_t2_4}" _autoremap="true"/>
+</Sequence>
+</BehaviorTree>
+
+
+<BehaviorTree ID="Take">
+  <Sequence>
+    <SubTree ID="GoToColor" _autoremap="true"/>
+    <SubTree ID="PickUp"    _autoremap="true"/>
+  </Sequence>
+</BehaviorTree>
+
+<BehaviorTree ID="GoToColor">
+  <SubTree ID="GoToObject" _autoremap="true"/>    
+</BehaviorTree>
+
+<BehaviorTree ID="GoToObject">
+  <Parallel failure_count="2" success_count="1">
+    <SubTree ID="FollowColor" _autoremap="true"/>
+    <ForceFailure>
+      <SubTree ID="ExploreXY" _autoremap="true"/>
+    </ForceFailure>
+  </Parallel>
+</BehaviorTree>
+
+<BehaviorTree ID="FollowColor">
+  <Parallel failure_count="1" success_count="1">
+    <AvoidObstacles name="avoid" Object="{Object}" />
+    <ReachColor name="ReachColor" Color="{Color}" Object="{Object}" knapsack="{knapsack}" Done="{Done}" mu="{mu}"/>
+  </Parallel>
+</BehaviorTree>
+
+<BehaviorTree ID="ExploreXY">
+  <Parallel failure_count="1" success_count="1">
+    <AvoidObstacles name="avoid" Object="{Object}" />
+    <GoToXY name="GoToXY" X="{X}" Y="{Y}" Object="{Object}" Done="{Done}" mu="{mu}"/>
+    <Wander name="wander" />
+  </Parallel>
+</BehaviorTree>
+
+<BehaviorTree ID="PickUp">
+  <Sequence>
+    <Place Object="{Object}" Color="{Color}" Target="knapsack" knapsack="{knapsack}" Done="{Done}" mu="{mu}"/>  
+  </Sequence>
+</BehaviorTree>
+
+<BehaviorTree ID="Return">
+  <Sequence>
+    <SubTree ID="GoToObject" Object="/Bill" _autoremap="true"/>
+    <SubTree ID="PutDown"    _autoremap="true"/>
+  </Sequence>
+</BehaviorTree>
+
+<BehaviorTree ID="PutDown">
+  <Sequence>
+    <Place Object="{Object}" Color="{Color}" Target="ground" knapsack="{knapsack}" Done="{Placed}" mu="{mu}"/>
+  </Sequence>
+</BehaviorTree>
+
+</root>
+===== ./plan/case1.xml =====
+<root BTCPP_format="4" main_tree_to_execute="MainTree1">
+
+<BehaviorTree ID="MainTree1">
+  <Parallel failure_count="1" success_count="2">
+    <SubTree ID="Task1" _autoremap="true" />
+    <SubTree ID="Task2" _autoremap="true" />
+  </Parallel>
+</BehaviorTree>
+
+<BehaviorTree ID="Task1">
+  <Parallel failure_count="4" success_count="4">
+    <SubTree ID="Take"   Object="/YellowCube" Color="Yellow" X="{YellowCube_x}" Y="{YellowCube_y}" Done="{done_yellow}" _autoremap="true"/>
+    <SubTree ID="Take"   Object="/OrangeCube" Color="Orange" X="{OrangeCube_x}" Y="{OrangeCube_y}" Done="{done_orange}" _autoremap="true"/>
+    <SubTree ID="Return" Object="/YellowCube" Color="Yellow" X="{Bill_x}"       Y="{Bill_y}"       Done="{done_yellow}" _autoremap="true"/>
+    <SubTree ID="Return" Object="/OrangeCube" Color="Orange" X="{Bill_x}"       Y="{Bill_y}"       Done="{done_orange}" _autoremap="true"/>
+  </Parallel>
+</BehaviorTree>
+
+<BehaviorTree ID="Task2">
+  <Parallel failure_count="4" success_count="4">
+    <SubTree ID="Take"   Object="/GreenCube" Color="Green" X="{GreenCube_x}" Y="{GreenCube_y}"  Done="{done_green}" _autoremap="true"/>
+    <SubTree ID="Take"   Object="/RedCube"   Color="Red"   X="{RedCube_x}"   Y="{RedCube_y}"    Done="{done_red}"   _autoremap="true"/>
+    <SubTree ID="Return" Object="/GreenCube" Color="Green" X="{Bill_x}"      Y="{Bill_y}"       Done="{done_green}" _autoremap="true"/>
+    <SubTree ID="Return" Object="/RedCube"   Color="Red"   X="{Bill_x}"      Y="{Bill_y}"       Done="{done_red}"   _autoremap="true"/>
+  </Parallel>
+</BehaviorTree>
+
+<BehaviorTree ID="Take">
+  <Sequence>
+    <SubTree ID="GoToColor" _autoremap="true"/>
+    <SubTree ID="PickUp"    _autoremap="true"/>
+  </Sequence>
+</BehaviorTree>
+
+<BehaviorTree ID="GoToColor">
+  <SubTree ID="GoToObject" _autoremap="true"/>    
+</BehaviorTree>
+
+<BehaviorTree ID="GoToObject">
+  <Parallel failure_count="2" success_count="1">
+    <SubTree ID="FollowColor" _autoremap="true"/>
+    <ForceFailure>
+      <SubTree ID="ExploreXY" _autoremap="true"/>
+    </ForceFailure>
+  </Parallel>
+</BehaviorTree>
+
+
+<BehaviorTree ID="FollowColor">
+  <Parallel failure_count="1" success_count="1">
+    <AvoidObstacles name="avoid" Object="{Object}" />
+    <ReachColor name="ReachColor" Color="{Color}" Object="{Object}" knapsack="{knapsack}" Done="{Done}" mu="{mu}"/>
+  </Parallel>
+</BehaviorTree>
+
+<BehaviorTree ID="ExploreXY">
+  <Parallel failure_count="1" success_count="1">
+    <AvoidObstacles name="avoid" Object="{Object}" />
+    <GoToXY name="GoToXY" X="{X}" Y="{Y}" Object="{Object}" Done="{Done}" mu="{mu}"/>
+    <Wander name="wander" />
+  </Parallel>
+</BehaviorTree>
+
+<BehaviorTree ID="PickUp">
+  <Sequence>
+    <Place Object="{Object}" Color="{Color}" Target="knapsack" knapsack="{knapsack}" Done="{Done}" mu="{mu}"/>  
+  </Sequence>
+</BehaviorTree>
+
+<BehaviorTree ID="Return">
+  <Sequence>
+    <SubTree ID="GoToObject" Object="/Bill" _autoremap="true"/>
+    <SubTree ID="PutDown"    _autoremap="true"/>
+  </Sequence>
+</BehaviorTree>
+
+<BehaviorTree ID="PutDown">
+  <Sequence>
+    <Place Object="{Object}" Color="{Color}" Target="ground" knapsack="{knapsack}" mu="{mu}"/>
+  </Sequence>
+</BehaviorTree>
+
+</root>
+===== ./sources/AttentionalBehavior.cpp =====
+ #include "AttentionalBehavior.h"
+ #include "SharedPerception.h"
+
+ AttentionalBehavior::AttentionalBehavior(const std::string& name, const BT::NodeConfig& config)
+                                        : BT::ThreadedAction(name, config) {}
+
+BT::PortsList AttentionalBehavior::providedPorts() {
+       return { BT::BidirectionalPort<double>("mu", 1.0, "Top-Down Regulation mu_b") };
+}
+
+BT::NodeStatus AttentionalBehavior::tick() {
+    auto& sp  = SharedPerception::get();
+    auto& arb = MotorArbitrator::getInstance();
+    const uint64_t key = UID();
+    sp.registerWorker();
+    struct Guard { SharedPerception& sp; MotorArbitrator& arb; uint64_t key;
+        ~Guard(){ arb.withdraw(key); sp.withdrawGoal(key); sp.unregisterWorker(); } } guard{sp, arb, key};
+
+    uint64_t seen = 0;
+    nextActivation_ = 0.0; active_ = false;
+    while (!isHaltRequested()) {
+        if (!sp.waitNextTick(seen, [this]{ return isHaltRequested(); })) continue;
+        const double now = sp.time();
+        try {
+            if (now >= nextActivation_) {
+                updatePerceptualSchema();
+                if (!getInput("mu", mu_)) mu_ = 1.0;
+                if (lambda_ < 0.01) lambda_ = 0.01;
+                emphasis_ = mu_ / lambda_;
+
+                active_ = checkInternalReleaser() && checkExternalReleaser();
+                if (active_) {
+                    std::tie(lastVL_, lastVR_) = executeMotorSchema();
+                    const bool stopped = (lastVL_ == 0.0 && lastVR_ == 0.0);
+                    if (stopped && name() != "avoid") {
+                        if (accomplishesTask()) taskAccomplished();
+                        sp.workerDone();
+                        return BT::NodeStatus::SUCCESS;
+                    }
+                } else { lastVL_ = lastVR_ = 0.0; }
+                nextActivation_ = now + 1.0 / std::max(emphasis_, 1e-3);
+            }
+            if (active_) { arb.propose(key, getUniqueID(), emphasis_, lastVL_, lastVR_, exclusive()); afterPropose(); }
+            else         { arb.withdraw(key); sp.withdrawGoal(key); }
+        } catch (const std::exception& e) { std::cout << "[" << name() << "] " << e.what() << std::endl; }
+        sp.workerDone();
+    }
+    return BT::NodeStatus::IDLE;
+}
+
+void AttentionalBehavior::halt() {
+    SharedPerception::get().wake();
+    BT::ThreadedAction::halt();
+    MotorArbitrator::getInstance().withdraw(UID()); 
+    SharedPerception::get().withdrawGoal(UID());
+    nextActivation_ = 0.0; active_ = false; lastVL_ = lastVR_ = 0.0; accomplished_ = false;
+}
+
+std::string AttentionalBehavior::getUniqueID() const {
+    std::string obj, color, target, place;
+    getInput("Object", obj); getInput("Color", color);
+    getInput("Object", target);  getInput("Target", place);
+    if (!exclusive()) return name() + "_" + (obj == "/Bill" ? obj : "");
+    std::string id = name();
+    if (obj == "/Bill") id += "_/Bill";
+    else if (!target.empty()) id += "_" + target;
+    if (!color.empty()) id += "_" + color;
+    if (!place.empty()) id += "_" + place;
+    return id;
+}
+===== ./sources/AvoidObstacles.cpp =====
+    #include "AvoidObstacles.h"
+    #include "SharedPerception.h"
+
+AvoidObstacles::AvoidObstacles(const std::string& name, const BT::NodeConfig& config, RemoteAPIObjects* sim)
+    : AttentionalBehavior(name, config), sim_(sim) {
+    
+    auto& sp = SharedPerception::get();
+    robotHandle_ = sp.handle("/PioneerP3DX");
+
+    sonarHandles_.clear();
+    sonarSide_.clear();
+
+    for (int i = 1; i <= 6; ++i) {
+        std::string sensorPath = "/PioneerP3DX/ultrasonicSensor[" + std::to_string(i) + "]";
+        int64_t h = sp.handle(sensorPath);
+        sonarHandles_.push_back(h);
+
+        auto p = sp.objectPosition(h, robotHandle_);
+        double a = std::atan2(p[1], p[0]);
+        sonarSide_.push_back((a > 0.35) ? +1 : (a < -0.35 ? -1 : 0));
+    }
+
+    lastDistances_.assign(sonarHandles_.size(), -1.0);
+}
+
+    BT::PortsList AvoidObstacles::providedPorts(){
+        BT::PortsList ports = {
+            BT::InputPort<std::string>("Object")
+        };
+        auto basePorts = AttentionalBehavior::providedPorts();
+        ports.insert(basePorts.begin(), basePorts.end());
+        return ports;
+    }
+
+    double AvoidObstacles::checkSonar(int64_t h) {
+        const auto& r = SharedPerception::get().sonar(h);
+        if (std::get<0>(r) == 1) {
+            int64_t det = std::get<3>(r);
+            if (!SharedPerception::get().isGoal(det) &&
+                !SharedPerception::get().inRobotTree(det))
+                return std::get<1>(r);
+        }
+        return -1;
+    }
+
+
+    void AvoidObstacles::updatePerceptualSchema() {
+        std::string path;
+        getInput("Object", path);
+        if (path != previousPath_) {
+            targetHandle_ = -1;
+            if (path.empty())
+                previousPath_ = path;
+            else {
+                try { targetHandle_ = sim_->sim().getObjectHandle(path); previousPath_ = path; }
+                catch (...) {}
+            }
+        }
+        ignoredValid_ = false;
+        distances.assign(sonarHandles_.size(), -1.0);
+        for (size_t i = 0; i < sonarHandles_.size(); ++i)
+            distances[i] = checkSonar(sonarHandles_[i]);
+
+        isObstacle = false;
+        double minDistance = 999.0;
+        for (double d : distances) {
+            if (d > 0.0) {
+                isObstacle = true;
+                if (d < minDistance) minDistance = d;
+            }
+        }
+
+        const double t = SharedPerception::get().time();
+        if (isObstacle) { holdUntil_ = t + kHoldSec; lastDistances_ = distances; lastMinDist_ = minDistance; }
+        else if (t >= holdUntil_) turnSign_ = 0;
+        lambda_ = saturatingLambda(isObstacle ? minDistance : lastMinDist_, 0.5, 1.0);
+        
+    }
+
+    bool AvoidObstacles::checkInternalReleaser(){
+        return isObstacle || SharedPerception::get().time() < holdUntil_;
+    }
+
+    bool AvoidObstacles::checkExternalReleaser(){
+        return true;
+    }
+    std::pair<double,double> AvoidObstacles::executeMotorSchema() {
+        const auto& d = isObstacle ? distances : lastDistances_;
+
+        double turn = 0.0, minDist = 999.0, minCenter = 999.0, leftSum = 0.0, rightSum = 0.0;
+        for (size_t i = 0; i < d.size(); ++i) {
+            if (d[i] <= 0.0) continue;
+            minDist = std::min(minDist, d[i]);
+            double w = 1.0 / (d[i] + 0.20);
+            if (sonarSide_[i] > 0) { turn -= w; leftSum  += w; }
+            else if (sonarSide_[i] < 0) { turn += w; rightSum += w; }
+            else                        { minCenter = std::min(minCenter, d[i]); }
+        }
+
+        bool symmetric = std::abs(turn) < 0.3 * std::max(leftSum, rightSum);
+        if (minCenter < 999.0 || symmetric) {
+            if (turnSign_ == 0) turnSign_ = (leftSum > rightSum) ? -1 : +1;
+            turn += turnSign_ * (1.0 / (std::min(minCenter, minDist) + 0.20));
+        }
+
+        double v = 0.35;
+        if (minDist < 0.20) v = 0.05;
+        else if (minDist < 0.40) v = 0.18;
+
+        double w_gain = (minDist < 0.35) ? 0.55 : 0.35;
+        double w = std::clamp(turn * w_gain, -1.2, 1.2);
+
+        const double L = 0.331;
+        return { v - w * L / 2.0, v + w * L / 2.0 };
+    }
+    
+    
+===== ./sources/GoToXY.cpp =====
+#include "GoToXY.h"
+#include "SharedPerception.h"
+#include <iostream>
+#include <cmath>
+#include <algorithm>
+
+GoToXY::GoToXY(const std::string& name, const BT::NodeConfig& config, RemoteAPIObjects* sim)
+    : AttentionalBehavior(name, config), sim_(sim) {
+    robotHandle_ = sim_->sim().getObjectHandle("/PioneerP3DX");
+}
+
+BT::PortsList GoToXY::providedPorts() {
+    BT::PortsList ports = { 
+        BT::InputPort<double>("X"), 
+        BT::InputPort<double>("Y"),
+        BT::InputPort<std::string>("Object"),
+        BT::InputPort<bool>("Done")
+    };
+    auto basePorts = AttentionalBehavior::providedPorts();
+    ports.insert(basePorts.begin(), basePorts.end());
+    return ports;
+}
+
+void GoToXY::updatePerceptualSchema() {
+    if (!getInput("X", targetX_) || !getInput("Y", targetY_)) {
+        dist_ = 999.0;
+        lambda_ = 1.0;
+        return;
+    }
+    try {
+        const auto& robotPos = SharedPerception::get().position();
+  
+        double dx = targetX_ - robotPos[0];
+        double dy = targetY_ - robotPos[1];
+        dist_ = std::sqrt(dx * dx + dy * dy);
+
+        lambda_ = saturatingLambda(dist_, 1.0, 10.0);
+
+        const auto& ori = SharedPerception::get().orientation();
+        double yaw = ori[2];
+        double targetAngle = std::atan2(dy, dx);
+        angleError_ = std::atan2(std::sin(targetAngle - yaw), std::cos(targetAngle - yaw));
+
+    } catch (const std::exception& e) {
+        dist_ = 999.0;
+        lambda_ = 1.0;
+    } catch (...) {
+        dist_ = 999.0;
+        lambda_ = 1.0;
+    }
+}
+
+bool GoToXY::checkInternalReleaser() {
+    if (std::abs(targetX_) > 7.5 || std::abs(targetY_) > 7.5)
+        return false;
+    return true; 
+}
+
+bool GoToXY::checkExternalReleaser() {
+    bool isDone = false;
+    getInput("Done", isDone);
+    std::string target;
+    getInput("Object", target);
+
+    if (target == "/Bill") return isDone;
+    return !isDone;
+}
+
+
+std::pair<double, double> GoToXY::executeMotorSchema() {
+    if (dist_ <= 0.55) return {0.0, 0.0};
+
+    double v = 0.25 * std::max(0.0, std::cos(angleError_));
+    double w = std::clamp(angleError_ * 1.0, -0.8, 0.8);
+
+    double v_left  = v - w * 0.331 / 2.0;
+    double v_right = v + w * 0.331 / 2.0;
+    return {v_left, v_right};
+}
+===== ./sources/MotorArbitrator.cpp =====
+#include "MotorArbitrator.h"
+#include "DecisionLogger.h"
+#include "SharedPerception.h"
+#include <iostream>
+#include <unordered_map>
+#include <algorithm>
+
+MotorArbitrator& MotorArbitrator::getInstance() {
+    static MotorArbitrator instance;
+    return instance;
+}
+
+void MotorArbitrator::reset() {
+    std::lock_guard<std::mutex> l(m_);
+    props_.clear();
+    proposals_.clear();
+    currentWinner_ = "none";
+    maxEmphasis_ = -1.0;
+    winningVLeft_ = 0.0;
+    winningVRight_ = 0.0;
+}
+
+void MotorArbitrator::propose(uint64_t key, const std::string& id, double e, double vL, double vR, bool exclusive) {
+    if (e <= 0.0) return;
+    std::lock_guard<std::mutex> l(m_);
+    props_[key] = {id, e, vL, vR, exclusive};
+}
+
+void MotorArbitrator::withdraw(uint64_t key) {
+    std::lock_guard<std::mutex> l(m_);
+    props_.erase(key);
+}
+
+bool MotorArbitrator::getWinningCommand(double& vLeft, double& vRight, std::string& winnerName, double& winnerEmphasis) const {
+    std::lock_guard<std::mutex> l(m_);
+    if (maxEmphasis_ < 0.0) return false;
+
+    vLeft = winningVLeft_;
+    vRight = winningVRight_;
+    winnerName = currentWinner_;
+    winnerEmphasis = maxEmphasis_;
+    return true;
+}
+
+void MotorArbitrator::applyCommand(RemoteAPIObjects* sim, int64_t leftMotor, int64_t rightMotor) {
+    {
+        std::lock_guard<std::mutex> l(m_);
+        proposals_.clear();
+        for (const auto& kv : props_) {
+            proposals_.push_back(kv.second);
+        }
+    }
+
+    if (proposals_.empty()) return;
+
+    const Proposal* win = nullptr;
+    for (auto& p : proposals_) {
+        if (p.exclusive && (!win || p.emphasis > win->emphasis)) {
+            win = &p;
+        }
+    }
+
+    std::unordered_map<std::string, const Proposal*> uniq;
+    for (auto& p : proposals_) {
+        if (!p.exclusive) {
+            auto& s = uniq[p.id];
+            if (!s || p.emphasis > s->emphasis) {
+                s = &p;
+            }
+        }
+    }
+
+    double sE = 0.0, sL = 0.0, sR = 0.0;
+    const Proposal* top = nullptr;
+
+    auto add = [&](const Proposal* p) {
+        sE += p->emphasis;
+        sL += p->emphasis * p->vL;
+        sR += p->emphasis * p->vR;
+        if (!top || p->emphasis > top->emphasis) top = p;
+    };
+
+    if (win) add(win);
+    for (auto& kv : uniq) add(kv.second);
+
+    double vL = (sE > 0.0) ? (sL / sE) : 0.0;
+    double vR = (sE > 0.0) ? (sR / sE) : 0.0;
+    const std::string winner = top ? top->id : "none";
+
+     SharedPerception::get().exec([&](RemoteAPIObjects& s) {
+        if (winner != previousWinner_) {
+            previousWinner_ = winner;
+            std::cout << "[Motor Arbitrator] Winner: " << winner << std::endl;
+            try { s.sim().setStringSignal("active_behavior", winner); } catch (...) {}
+        }
+
+        if (leftMotor >= 0 && rightMotor >= 0) {
+            try {
+                s.sim().setJointTargetVelocity(leftMotor,  vL / 0.0975);
+                s.sim().setJointTargetVelocity(rightMotor, vR / 0.0975);
+            } catch (...) {
+                std::cout << "Exception in MotorArbitrator::applyCommand" << std::endl;
+            }
+        }
+    });
+
+    if (win) {
+        static std::string prevGoal;
+        if (win->id != prevGoal) {
+            prevGoal = win->id;
+            std::map<std::string, double> best;
+            for (const auto& p : proposals_)
+                if (p.exclusive) best[p.id] = std::max(best[p.id], p.emphasis);
+            std::vector<std::pair<std::string, double>> comp(best.begin(), best.end());
+            DecisionLogger::get().log(SharedPerception::get().time(), win->id, win->emphasis, comp);
+        }
+    }
+}
+===== ./sources/Place.cpp =====
+    #include "Place.h"
+    #include "SharedPerception.h"
+
+    Place::Place(const std::string& name, const BT::NodeConfig& config, RemoteAPIObjects* sim)
+        : AttentionalBehavior(name, config), sim_(sim) {}
+
+    BT::PortsList Place::providedPorts(){
+        BT::PortsList ports = {
+            BT::InputPort<std::string>("Object"),
+            BT::InputPort<std::string>("Color"),
+            BT::InputPort<std::string>("Target"),
+            BT::BidirectionalPort<bool>("Done"),
+            BT::BidirectionalPort<std::vector<int>>("knapsack")
+        };
+        auto basePorts = AttentionalBehavior::providedPorts();
+        ports.insert(basePorts.begin(), basePorts.end());
+        return ports;
+    }
+
+    bool Place::checkInternalReleaser(){
+        if (targetHandle_ == -1) return false;
+        bool inKnapsack = (std::find(knapsack.begin(), knapsack.end(), static_cast<int>(targetHandle_)) != knapsack.end());
+        if (target_ == "ground")return inKnapsack;
+        else return (knapsack.size() < 4 && !inKnapsack);
+    }
+
+    bool Place::checkExternalReleaser(){
+        bool isDone = false;
+        getInput("Done", isDone);
+
+        if (target_ == "knapsack" && isDone ) return false;      
+
+        return (distance < 0.6);
+    }
+
+    void Place::updatePerceptualSchema() {
+        getInput("Target", target_);
+        getInput("Object", objectPath_);
+        getInput("knapsack", knapsack);
+        if (!objectPath_.empty() && objectPath_ != previousPath_) {
+            targetHandle_ = SharedPerception::get().handle(objectPath_);
+            previousPath_ = objectPath_;
+        }
+        distance = 999.0;
+        try { distance =  SharedPerception::get().exec([&](RemoteAPIObjects& s){ return s.getDistanceTo(objectPath_); }); }
+        catch (...) {}
+        lambda_ = saturatingLambda(distance, 0.5, 1.0);
+    }
+
+    std::pair<double, double> Place::executeMotorSchema() {
+        if (target_ == "knapsack") {
+            size_t n = knapsack.size();
+            int index = n + 6;
+            std::string connectionPath = "/PioneerP3DX/connection[" + std::to_string(index)  + "]";
+            
+            try {
+                int64_t connHandle = sim_->sim().getObjectHandle(connectionPath);
+                sim_->sim().setObjectInt32Param(targetHandle_, sim_->sim().shapeintparam_static, 1);
+                sim_->sim().setObjectInt32Param(targetHandle_, sim_->sim().shapeintparam_respondable, 0);
+                sim_->sim().resetDynamicObject(targetHandle_);
+                sim_->sim().setObjectParent(targetHandle_, connHandle, false);
+                sim_->sim().setObjectPosition(targetHandle_, connHandle, {0.0, 0.0, 0.05});
+
+                if (std::find(knapsack.begin(), knapsack.end(), static_cast<int>(targetHandle_)) == knapsack.end())
+                    knapsack.push_back(static_cast<int>(targetHandle_));
+                
+                setOutput("Done", true);
+                setOutput("knapsack", knapsack);
+            } catch (...) {}
+        } else if (target_ == "ground") {
+            sim_->sim().setObjectParent(targetHandle_, -1, true);
+            auto robotPos = SharedPerception::get().position();
+            std::vector<double> groundPos = {robotPos[0] + 0.4, robotPos[1] + 0.3, 0.05};
+        SharedPerception::get().exec([&](RemoteAPIObjects& s) {
+            s.sim().setObjectPosition(targetHandle_, -1, groundPos);
+            s.sim().setObjectInt32Param(targetHandle_, s.sim().shapeintparam_static, 0);
+            s.sim().setObjectInt32Param(targetHandle_, s.sim().shapeintparam_respondable, 1);
+            s.sim().resetDynamicObject(targetHandle_);
+        });
+
+            auto it = std::find(knapsack.begin(), knapsack.end(), static_cast<int>(targetHandle_));
+            if (it != knapsack.end()) {
+                knapsack.erase(it);
+            }
+            setOutput("Done", false);
+            setOutput("knapsack", knapsack);
+        }
+        
+        return {0.0, 0.0};
+    }
+
+
+===== ./sources/ReachColor.cpp =====
+#include "ReachColor.h"
+#include "SharedPerception.h" 
+#include <iostream>
+#include <cmath>
+#include <algorithm>
+
+
+static double hueOf(const std::string& c) {
+    if (c == "Red") return 0.0;   if (c == "Orange") return 30.0;
+    if (c == "Yellow") return 60.0; if (c == "Green") return 120.0;
+    return -1.0;
+}
+
+static int countHue(const std::vector<unsigned char>& img, double hueDeg, double tol = 12.0) {
+    int n = 0;
+    for (size_t i = 0; i + 2 < img.size(); i += 3) {
+        const double r = img[i] / 255.0, g = img[i+1] / 255.0, b = img[i+2] / 255.0;
+        const double mx = std::max({r, g, b}), mn = std::min({r, g, b}), d = mx - mn;
+        if (mx < 0.25 || d / mx < 0.5) continue;
+        double h = (mx == r) ? 60.0 * std::fmod((g - b) / d, 6.0)
+                 : (mx == g) ? 60.0 * ((b - r) / d + 2.0)
+                             : 60.0 * ((r - g) / d + 4.0);
+        if (h < 0) h += 360.0;
+        const double dh = std::min(std::abs(h - hueDeg), 360.0 - std::abs(h - hueDeg));
+        if (dh < tol) ++n;
+    }
+    return n;
+}
+
+
+ReachColor::ReachColor(const std::string& name, const BT::NodeConfig& config, RemoteAPIObjects* sim)
+    : AttentionalBehavior(name, config), sim_(sim) {
+    auto& sp = SharedPerception::get();
+    robotHandle_ = sp.handle("/PioneerP3DX");
+}
+
+BT::PortsList ReachColor::providedPorts() {
+    BT::PortsList ports = {
+        BT::InputPort<std::string>("Color"),
+        BT::InputPort<std::string>("Object"),
+        BT::InputPort<std::vector<int>>("knapsack"),
+        BT::InputPort<bool>("Done"),
+        BT::InputPort<bool>("Return")
+    };
+    auto basePorts = AttentionalBehavior::providedPorts();
+    ports.insert(basePorts.begin(), basePorts.end());
+    return ports;
+}
+
+void ReachColor::updatePerceptualSchema() {
+    distance_ = 999.0;
+    lambda_   = 1.0;
+    isTargetVisible_ = false;
+
+    getInput("Object", target_);
+    getInput("knapsack", knapsack);
+    if (target_.empty()) { tracking_ = false; return; }
+
+    bool taken = false;
+    getInput("Done", taken);
+    if (target_ == "/Bill") {
+        if (!taken || knapsack.empty()) { tracking_ = false; return; }
+    } else {
+        if (taken || isObjectInKnapsack()) { tracking_ = false; return; }
+    }
+
+    try {
+        auto& sp = SharedPerception::get();
+        targetHandle_ = resolveTarget();
+        if (targetHandle_ == -1) return;
+
+        if (target_ == "/Bill") {
+            auto bp = sp.objectPosition(targetHandle_, -1);
+            const auto& rp = sp.position();
+            const double yaw = sp.orientation()[2];
+            const double dx = bp[0] - rp[0], dy = bp[1] - rp[1];
+
+            relX_ =  std::cos(yaw) * dx + std::sin(yaw) * dy;
+            relY_ = -std::sin(yaw) * dx + std::cos(yaw) * dy;
+            distance_ = std::hypot(relX_, relY_);
+            lambda_ = saturatingLambda(distance_, 1.0, 10.0);
+            isTargetVisible_ = true;
+            return;
+        }
+
+        auto imgPtr = sp.image();
+        if (!imgPtr || imgPtr->empty()) {
+            tracking_ = false;
+            return;
+        }
+
+        std::string color; 
+        getInput("Color", color);
+        const double hue = hueOf(color);
+        const double tol = (hue == 30.0 || hue == 60.0) ? 8.0 : 12.0;
+
+        const int px = countHue(*imgPtr, hue, tol);
+
+        auto pos = sp.objectPosition(targetHandle_, robotHandle_);
+        relX_ = pos[0]; 
+        relY_ = pos[1];
+        distance_ = std::hypot(relX_, relY_);
+
+        isTargetVisible_ = (px >= 30/*kMinPixels*/) || (tracking_ && distance_ < 1.0);
+        tracking_ = isTargetVisible_;
+        if (isTargetVisible_) {
+            lambda_ = saturatingLambda(distance_, 1.0, 10.0);
+        }
+
+    } catch (const std::exception& e) {
+        tracking_ = false;
+        std::cout << "EXCEPTION IN REACH COLOR: " << e.what() << std::endl;
+    }
+}
+
+
+bool ReachColor::checkInternalReleaser() {
+    return isTargetVisible_;
+}
+
+
+bool ReachColor::checkExternalReleaser() {
+    bool isDone = false;
+    getInput("Done", isDone);
+    
+    if (target_ == "/Bill") 
+        return isDone && !knapsack.empty();
+
+    if (isDone || isObjectInKnapsack()) return false; 
+
+    return true;
+}
+
+
+int64_t ReachColor::resolveTarget() {
+    if (target_ != previousTarget_) {
+        targetHandle_ = SharedPerception::get().handle(target_);
+        previousTarget_ = target_;
+    }
+    return targetHandle_;
+}
+
+bool ReachColor::isObjectInKnapsack(){
+    try {
+        targetHandle_ = resolveTarget();
+        int targetHandleInt = static_cast<int>(targetHandle_);
+        return (std::find(knapsack.begin(), knapsack.end(), targetHandleInt) != knapsack.end());
+    } catch (...) {
+        return false;
+    }
+}
+
+std::pair<double, double> ReachColor::executeMotorSchema() { 
+    
+    if (distance_ <= 0.55) return {0.0, 0.0};
+
+    double angle = std::atan2(relY_, relX_);
+
+    double v_max = 0.40;
+    if (distance_ < 1.0)
+        v_max = 0.15 + (distance_ / 1.0) * 0.25;
+    
+    
+    double v = 0.0;
+    if (std::abs(angle) < (M_PI / 3.0))
+        v = v_max * std::cos(angle);
+    
+
+    double w = std::clamp(angle * 1.8, -1.2, 1.2);
+
+    double L = 0.331;
+    double v_left  = v - (w * L) / 2.0;
+    double v_right = v + (w * L) / 2.0;
+
+    return {v_left, v_right};
+}
+
+===== ./sources/Wander.cpp =====
+#include "Wander.h"
+#include "SharedPerception.h"
+#include "TrialSetup.h"
+
+Wander::Wander(const std::string& name, const BT::NodeConfig& config, RemoteAPIObjects* sim)
+        : AttentionalBehavior(name, config), sim_(sim) {
+    rng_.seed(trialSeed());
+    targetX_ = dist_(rng_);
+    targetY_ = dist_(rng_);
+    lambda_ = 1.0;
+    robotHandle_ = sim_->sim().getObjectHandle("/PioneerP3DX");
+
+}
+
+BT::PortsList Wander::providedPorts() {
+    return AttentionalBehavior::providedPorts();
+}
+
+void Wander::updatePerceptualSchema() {
+    const auto& robotPos = SharedPerception::get().position();
+    const auto& ori = SharedPerception::get().orientation();
+    
+    double dx = targetX_ - robotPos[0];
+    double dy = targetY_ - robotPos[1];
+    current_dist_ = std::sqrt(dx * dx + dy * dy);
+    double targetAngle = std::atan2(dy, dx);
+    angleError_ = std::atan2(std::sin(targetAngle - ori[2]), std::cos(targetAngle - ori[2]));
+  const double t = SharedPerception::get().time();
+    if (t >= retargetAt_ || current_dist_ < 0.3) {
+        targetX_ = dist_(rng_);  targetY_ = dist_(rng_);
+        retargetAt_ = t + 15.0;
+    }
+    lambda_ = 1.0;
+}
+
+bool Wander::checkInternalReleaser() {
+    return true;
+}
+
+bool Wander::checkExternalReleaser() {
+    return true;    
+}
+
+std::pair<double, double> Wander::executeMotorSchema() {
+
+    double v = 0.2 * std::max(0.0, std::cos(angleError_));
+    double w = std::clamp(angleError_ * 1.0, -0.8, 0.8);
+
+    double v_left  = v - w * 0.331 / 2.0;
+    double v_right = v + w * 0.331 / 2.0;
+    return {v_left, v_right};
+}
+

@@ -1,21 +1,27 @@
     #include "AvoidObstacles.h"
     #include "SharedPerception.h"
 
-    AvoidObstacles::AvoidObstacles(const std::string& name, const BT::NodeConfig& config, RemoteAPIObjects* sim)
-        : AttentionalBehavior(name, config), sim_(sim) {
-        robotHandle_ = sim_->sim().getObjectHandle("/PioneerP3DX");
+AvoidObstacles::AvoidObstacles(const std::string& name, const BT::NodeConfig& config, RemoteAPIObjects* sim)
+    : AttentionalBehavior(name, config), sim_(sim) {
+    
+    auto& sp = SharedPerception::get();
+    robotHandle_ = sp.handle("/PioneerP3DX");
 
-        for (int i = 1; i <= 6; ++i) {
-            int64_t h = sim_->sim().getObjectHandle(
-                "/PioneerP3DX/ultrasonicSensor[" + std::to_string(i) + "]");
-            sonarHandles_.push_back(h);
+    sonarHandles_.clear();
+    sonarSide_.clear();
 
-            auto p = sim_->sim().getObjectPosition(h, robotHandle_);
-            double a = std::atan2(p[1], p[0]);
-            sonarSide_.push_back((a > 0.35) ? +1 : (a < -0.35 ? -1 : 0));
-        }
-        lastDistances_.assign(sonarHandles_.size(), -1.0);
+    for (int i = 1; i <= 6; ++i) {
+        std::string sensorPath = "/PioneerP3DX/ultrasonicSensor[" + std::to_string(i) + "]";
+        int64_t h = sp.handle(sensorPath);
+        sonarHandles_.push_back(h);
+
+        auto p = sp.objectPosition(h, robotHandle_);
+        double a = std::atan2(p[1], p[0]);
+        sonarSide_.push_back((a > 0.35) ? +1 : (a < -0.35 ? -1 : 0));
     }
+
+    lastDistances_.assign(sonarHandles_.size(), -1.0);
+}
 
     BT::PortsList AvoidObstacles::providedPorts(){
         BT::PortsList ports = {
@@ -24,19 +30,6 @@
         auto basePorts = AttentionalBehavior::providedPorts();
         ports.insert(basePorts.begin(), basePorts.end());
         return ports;
-    }
-
-    bool AvoidObstacles::isIgnored(int64_t detected) {
-        if (detected == -1) return false;
-        if (detected == targetHandle_) return true;
-        if (!ignoredValid_) {
-            ignored_.clear();
-            try {
-                for (auto h : sim_->sim().getObjectsInTree(robotHandle_)) ignored_.insert(h);
-            } catch (...) {}
-            ignoredValid_ = true;
-        }
-        return ignored_.count(detected) > 0;
     }
 
     double AvoidObstacles::checkSonar(int64_t h) {
@@ -59,7 +52,7 @@
             if (path.empty())
                 previousPath_ = path;
             else {
-                try { targetHandle_ = sim_->sim().getObjectHandle(path); previousPath_ = path; }
+                try { targetHandle_ = SharedPerception::get().handle(path); previousPath_ = path; }
                 catch (...) {}
             }
         }

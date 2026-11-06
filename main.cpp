@@ -18,6 +18,24 @@
 #include "RemoteAPIClient.h"
 #include "RemoteAPIObjects.h"
 
+struct Handles {
+    int64_t robot      = -1;
+    int64_t leftMotor  = -1;
+    int64_t rightMotor = -1;
+    int64_t camera     = -1;
+    int64_t bill       = -1;
+
+    static Handles init(SharedPerception& sp) {
+        Handles h;
+        h.robot      = sp.handle("/PioneerP3DX");
+        h.leftMotor  = sp.handle("/PioneerP3DX/leftMotor");
+        h.rightMotor = sp.handle("/PioneerP3DX/rightMotor");
+        h.camera     = sp.handle("/PioneerP3DX/visionSensor");
+        h.bill       = sp.handle("/Bill");
+        return h;
+    }
+};
+
 
 int main(int argc, char** argv) {
     const unsigned seed   = (argc > 1) ? static_cast<unsigned>(std::stoul(argv[1])) : 1;
@@ -29,6 +47,17 @@ int main(int argc, char** argv) {
     RemoteAPIObjects sim(&client);
     client.setStepping(true);
 
+    
+    int64_t leftMotor  = sim.sim().getObjectHandle("/PioneerP3DX/leftMotor");
+    int64_t rightMotor = sim.sim().getObjectHandle("/PioneerP3DX/rightMotor");
+    int64_t robot      = sim.sim().getObjectHandle("/PioneerP3DX");
+    int64_t camera     = sim.sim().getObjectHandle("/PioneerP3DX/visionSensor");
+
+    auto& sp = SharedPerception::get();
+    sp.setup(&sim, robot, camera);
+    Handles handles = Handles::init(sp);
+
+
     BT::BehaviorTreeFactory factory;
     factory.registerNodeType<AvoidObstacles>("AvoidObstacles", &sim);
     factory.registerNodeType<ReachColor>("ReachColor", &sim);
@@ -36,12 +65,7 @@ int main(int argc, char** argv) {
     factory.registerNodeType<Place>("Place", &sim);
     factory.registerNodeType<Wander>("Wander", &sim);
     auto tree = factory.createTreeFromFile("../plan/case1.xml");
-    BT::TreeObserver observer(tree); 
-    int64_t leftMotor  = sim.sim().getObjectHandle("/PioneerP3DX/leftMotor");
-    int64_t rightMotor = sim.sim().getObjectHandle("/PioneerP3DX/rightMotor");
-    int64_t robot      = sim.sim().getObjectHandle("/PioneerP3DX");
-    int64_t camera     = sim.sim().getObjectHandle("/PioneerP3DX/visionSensor");
-    SharedPerception::get().setup(&sim, robot, camera);
+    BT::TreeObserver observer(tree);
 
     auto cubes = randomizeCubes(sim, seed,
                                 {"/GreenCube", "/RedCube", "/YellowCube", "/OrangeCube"},
@@ -71,24 +95,22 @@ int main(int argc, char** argv) {
     bool havePrev = false;
     BT::NodeStatus st;
 
-    
+
     while (true) {
-        SharedPerception::get().newTick();
-        sim.sim().handleVisionSensor(camera); 
-        const double t = SharedPerception::get().time();
-        const auto& pos = SharedPerception::get().position();
-        if (havePrev) pathLen += std::hypot(pos[0] - px, pos[1] - py);
+        sp.exec([&](RemoteAPIObjects& s){ s.sim().handleVisionSensor(handles.camera); });
+        sp.newTick();
+        const double t = sp.time();
+        const auto pos = sp.position();
+        if (havePrev) pathLen += std::hypot(pos[0]-px, pos[1]-py);
         px = pos[0]; py = pos[1]; havePrev = true;
 
-        MotorArbitrator::getInstance().reset();
-        st = tree.tickExactlyOnce();
-        MotorArbitrator::getInstance().applyCommand(&sim, leftMotor, rightMotor);
-        client.step();
-
-        if (st != BT::NodeStatus::RUNNING) {
-            result = (st == BT::NodeStatus::SUCCESS) ? "SUCCESS" : "FAILURE";
-            break;
-        }
+        BT::NodeStatus st;
+        try { st = tree.tickExactlyOnce(); }
+        catch (const std::exception& e) { std::cout << "[BT ERROR] " << e.what() << std::endl; result = "ERROR"; break; }
+        sp.waitWorkersDone(std::chrono::milliseconds(200));
+        sp.exec([&](RemoteAPIObjects&){ MotorArbitrator::getInstance().applyCommand(&sim, handles.leftMotor, handles.rightMotor); });
+        sp.exec([&](RemoteAPIObjects&){ client.step(); });
+        if (st != BT::NodeStatus::RUNNING) { result = (st == BT::NodeStatus::SUCCESS) ? "SUCCESS" : "FAILURE"; break; }
         if (t > maxT) break;
     }
 

@@ -27,11 +27,10 @@ public:
     ReachColor(const std::string& name, const BT::NodeConfig& config, RemoteAPIObjects* sim);
 
     static BT::PortsList providedPorts();
-
     bool checkInternalReleaser() override;
     bool checkExternalReleaser() override;
     void updatePerceptualSchema() override;
-    void afterPropose() override { SharedPerception::get().offerGoal(targetHandle_, emphasis_); }
+    void afterPropose() override { SharedPerception::get().offerGoal(UID(), targetHandle_, emphasis_); }
     std::pair<double, double> executeMotorSchema() override;
 };
 

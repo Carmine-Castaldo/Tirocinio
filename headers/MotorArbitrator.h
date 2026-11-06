@@ -2,33 +2,43 @@
 #define MOTOR_ARBITRATOR_H
 
 #include <string>
+#include <vector>
+#include <map>
+#include <mutex>
 #include <iostream>
 #include "RemoteAPIObjects.h"
 
-struct Proposal { std::string id; double emphasis, vL, vR; bool exclusive; };
-
-//Nota: Classe Singleton
+struct Proposal {
+    std::string id;
+    double emphasis;
+    double vL;
+    double vR;
+    bool exclusive;
+};
 
 class MotorArbitrator {
-    private:
-        std::string previousWinner_ = "none", currentWinner_ = "none";
-        double maxEmphasis_ = -1.0, winningVLeft_ = 0.0, winningVRight_ = 0.0;
-        int64_t bannerHandle_ = -1;
-        std::vector<Proposal> proposals_;
-        
-        MotorArbitrator() = default;
+private:
+    std::string previousWinner_ = "none";
+    std::string currentWinner_ = "none";
+    double maxEmphasis_ = -1.0;
+    double winningVLeft_ = 0.0;
+    double winningVRight_ = 0.0;
 
-    public:
-        static MotorArbitrator& getInstance();
+    mutable std::mutex m_;
+    std::map<uint64_t, Proposal> props_;
+    std::vector<Proposal> proposals_; 
 
-        void reset();
+    MotorArbitrator() = default;
 
-        void proposeCommand(const std::string& id, double e, double vL, double vR, bool exclusive);
+public:
+    static MotorArbitrator& getInstance();
 
-        bool getWinningCommand(double& vLeft, double& vRight, std::string& winnerName, double& winnerEmphasis) const;
-        
-        void applyCommand(RemoteAPIObjects* sim, int64_t leftMotor, int64_t rightMotor);
-        
+    void reset();
+    void propose(uint64_t key, const std::string& id, double e, double vL, double vR, bool exclusive);
+    void withdraw(uint64_t key);
+
+    bool getWinningCommand(double& vLeft, double& vRight, std::string& winnerName, double& winnerEmphasis) const;
+    void applyCommand(RemoteAPIObjects* sim, int64_t leftMotor, int64_t rightMotor);
 };
 
 #endif // MOTOR_ARBITRATOR_H

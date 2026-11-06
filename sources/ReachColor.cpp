@@ -30,7 +30,8 @@ static int countHue(const std::vector<unsigned char>& img, double hueDeg, double
 
 ReachColor::ReachColor(const std::string& name, const BT::NodeConfig& config, RemoteAPIObjects* sim)
     : AttentionalBehavior(name, config), sim_(sim) {
-    robotHandle_ = sim_->sim().getObjectHandle("/PioneerP3DX");
+    auto& sp = SharedPerception::get();
+    robotHandle_ = sp.handle("/PioneerP3DX");
 }
 
 BT::PortsList ReachColor::providedPorts() {
@@ -64,14 +65,16 @@ void ReachColor::updatePerceptualSchema() {
     }
 
     try {
+        auto& sp = SharedPerception::get();
         targetHandle_ = resolveTarget();
         if (targetHandle_ == -1) return;
 
         if (target_ == "/Bill") {
-            auto bp = sim_->sim().getObjectPosition(targetHandle_, -1);
-            const auto& rp = SharedPerception::get().position();
-            const double yaw = SharedPerception::get().orientation()[2];
+            auto bp = sp.objectPosition(targetHandle_, -1);
+            const auto& rp = sp.position();
+            const double yaw = sp.orientation()[2];
             const double dx = bp[0] - rp[0], dy = bp[1] - rp[1];
+
             relX_ =  std::cos(yaw) * dx + std::sin(yaw) * dy;
             relY_ = -std::sin(yaw) * dx + std::cos(yaw) * dy;
             distance_ = std::hypot(relX_, relY_);
@@ -79,34 +82,37 @@ void ReachColor::updatePerceptualSchema() {
             isTargetVisible_ = true;
             return;
         }
-        const int64_t cam = SharedPerception::get().cameraHandle();
-        static double cachedT = -1.0;
-        static std::vector<unsigned char> cachedImg;
-        const double now = SharedPerception::get().time();
-        if (now != cachedT) {
-            auto res = sim_->sim().getVisionSensorImg(cam);
-            const auto& img = std::get<0>(res);
-            cachedImg.assign(img.begin(), img.end());
-            cachedT = now;
+
+        auto imgPtr = sp.image();
+        if (!imgPtr || imgPtr->empty()) {
+            tracking_ = false;
+            return;
         }
 
-        std::string color; getInput("Color", color);
+        std::string color; 
+        getInput("Color", color);
         const double hue = hueOf(color);
         const double tol = (hue == 30.0 || hue == 60.0) ? 8.0 : 12.0;
-        const int px = countHue(cachedImg, hue, tol);
 
-        auto pos = sim_->sim().getObjectPosition(targetHandle_, robotHandle_);
-        relX_ = pos[0]; relY_ = pos[1];
+        const int px = countHue(*imgPtr, hue, tol);
+
+        auto pos = sp.objectPosition(targetHandle_, robotHandle_);
+        relX_ = pos[0]; 
+        relY_ = pos[1];
         distance_ = std::hypot(relX_, relY_);
 
         isTargetVisible_ = (px >= 30/*kMinPixels*/) || (tracking_ && distance_ < 1.0);
         tracking_ = isTargetVisible_;
-        if (isTargetVisible_) lambda_ = saturatingLambda(distance_, 1.0, 10.0);
+        if (isTargetVisible_) {
+            lambda_ = saturatingLambda(distance_, 1.0, 10.0);
+        }
+
     } catch (const std::exception& e) {
         tracking_ = false;
         std::cout << "EXCEPTION IN REACH COLOR: " << e.what() << std::endl;
     }
 }
+
 
 bool ReachColor::checkInternalReleaser() {
     return isTargetVisible_;
@@ -128,7 +134,7 @@ bool ReachColor::checkExternalReleaser() {
 
 int64_t ReachColor::resolveTarget() {
     if (target_ != previousTarget_) {
-        targetHandle_ = sim_->sim().getObjectHandle(target_);
+        targetHandle_ = SharedPerception::get().handle(target_);
         previousTarget_ = target_;
     }
     return targetHandle_;

@@ -66,12 +66,13 @@ bool GoToXY::checkExternalReleaser() {
     return !isDone;
 }
 
-
 std::pair<double, double> GoToXY::executeMotorSchema() {
     if (dist_ <= 0.55) return {0.0, 0.0};
 
+    // Velocità lineare v originariamente a 0.25, abbassata a 0.125
     double v = 0.25 * std::max(0.0, std::cos(angleError_));
-    double w = std::clamp(angleError_ * 1.0, -0.8, 0.8);
+    // w manteneva lo standard [-0.8, 0.8] nel tuo codice
+    double w = std::clamp(angleError_ * 0.5, -0.8, 0.8); 
 
     double v_left  = v - w * 0.331 / 2.0;
     double v_right = v + w * 0.331 / 2.0;

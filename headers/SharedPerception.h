@@ -32,6 +32,7 @@ public:
     void newTick() {
         std::lock_guard<std::recursive_mutex> l(m_);
         poseOk_ = false; treeOk_ = false; timeOk_ = false;
+        refreshPose();
         sonar_.clear();
         goal_ = -1;
         double bestE = -1.0;
@@ -39,10 +40,11 @@ public:
             if (kv.second.second > bestE) { bestE = kv.second.second; goal_ = kv.second.first; }
         ++seq_;
         done_ = 0;
+        arbDone_ = false;
         cv_.notify_all();
     }
 
-    void wake() { cv_.notify_all(); }
+    void wake() { cv_.notify_all(); cvDone_.notify_all(); }
 
     bool waitNextTick(uint64_t& seen, const std::function<bool()>& stop) {
         std::unique_lock<std::recursive_mutex> lk(m_);
@@ -50,15 +52,18 @@ public:
         if (seq_ > seen) { seen = seq_; return true; }
         return false;
     }
-
     void registerWorker()   { std::lock_guard<std::recursive_mutex> l(m_); ++workers_; }
     void unregisterWorker() { std::lock_guard<std::recursive_mutex> l(m_); --workers_; cvDone_.notify_all(); }
     void workerDone()       { std::lock_guard<std::recursive_mutex> l(m_); ++done_; cvDone_.notify_all(); }
-    void waitWorkersDone(std::chrono::milliseconds timeout = std::chrono::milliseconds(200)) {
+    void waitWorkersDone(std::chrono::milliseconds timeout = std::chrono::milliseconds(500)) {
         std::unique_lock<std::recursive_mutex> lk(m_);
         cvDone_.wait_for(lk, timeout, [&] { return done_ >= workers_; });
     }
-
+    void arbitratorDone() { std::lock_guard<std::recursive_mutex> l(m_); arbDone_ = true; cvDone_.notify_all(); }
+    void waitArbitratorDone(std::chrono::milliseconds timeout = std::chrono::milliseconds(500)) {
+        std::unique_lock<std::recursive_mutex> lk(m_);
+        cvDone_.wait_for(lk, timeout, [&] { return arbDone_; });
+    }
     std::vector<double> position() {
         std::lock_guard<std::recursive_mutex> l(m_);
         refreshPose();
@@ -164,7 +169,7 @@ private:
     RemoteAPIObjects* sim_ = nullptr;
     int64_t robot_ = -1, camera_ = -1;
 
-    bool poseOk_ = false, treeOk_ = false, timeOk_ = false;
+    bool poseOk_ = false, treeOk_ = false, timeOk_ = false, arbDone_ = false;
     std::vector<double> pos_, ori_;
     double t_ = 0.0;
     std::unordered_map<int64_t, Sonar> sonar_;

@@ -1,40 +1,49 @@
+#include <algorithm>
 #include <cmath>
 #include <fstream>
 #include <iostream>
+#include <chrono>
 #include <string>
+#include <thread>
+#include <tuple>
+#include <vector>
 
-#include "ReachColor.h"
 #include "AvoidObstacles.h"
-#include "Wander.h"
+#include "DecisionLogger.h"
 #include "GoToXY.h"
-#include "Place.h"
 #include "MotorArbitrator.h"
+#include "Place.h"
+#include "ReachColor.h"
 #include "SharedPerception.h"
 #include "TrialSetup.h"
-#include "DecisionLogger.h"
+#include "Wander.h"
+
 #include <behaviortree_cpp/bt_factory.h>
 #include <behaviortree_cpp/loggers/bt_observer.h>
 
 #include "RemoteAPIClient.h"
 #include "RemoteAPIObjects.h"
 
-struct Handles {
-    int64_t robot      = -1;
+const std::vector<std::string> G_CUBE_LIST = {"/GreenCube", "/RedCube", "/YellowCube", "/OrangeCube"};
+const std::vector<std::string> G_IGNORE_LIST = {"/PioneerP3DX", "/Bill"};
+const std::string G_ROBOT_NAME = "/PioneerP3DX";
+const std::string G_BILL_NAME = "/Bill";
+static uint64_t g_tickCount = 0;
+
+struct SimHandles {
     int64_t leftMotor  = -1;
     int64_t rightMotor = -1;
+    int64_t robot      = -1;
     int64_t camera     = -1;
-    int64_t bill       = -1;
-
-    static Handles init(SharedPerception& sp) {
-        Handles h;
-        h.robot      = sp.handle("/PioneerP3DX");
-        h.leftMotor  = sp.handle("/PioneerP3DX/leftMotor");
-        h.rightMotor = sp.handle("/PioneerP3DX/rightMotor");
-        h.camera     = sp.handle("/PioneerP3DX/visionSensor");
-        h.bill       = sp.handle("/Bill");
-        return h;
-    }
 };
+
+SimHandles initSimulation(RemoteAPIObjects& sim);
+BT::Tree createBehaviorTree(BT::BehaviorTreeFactory& factory, RemoteAPIObjects& sim, const std::string& xmlPath);
+void setupEnvironmentAndBlackboard(RemoteAPIObjects& sim, const BT::Blackboard::Ptr& blackboard, unsigned seed, const std::string& outDir);
+std::pair<std::string, double> runSimulationLoop(RemoteAPIClient& client, RemoteAPIObjects& sim, BT::Tree& tree, 
+                                                 const SimHandles& handles, double maxT);
+void logFailures(const BT::Tree& tree, const BT::TreeObserver& observer, const std::string& outDir, unsigned seed);
+void saveTrialSummary(const std::string& outDir, unsigned seed, const std::string& result, double simTime, double pathLen);
 
 
 int main(int argc, char** argv) {
@@ -45,103 +54,162 @@ int main(int argc, char** argv) {
 
     RemoteAPIClient client("127.0.0.1", 23000);
     RemoteAPIObjects sim(&client);
-    client.setStepping(true);
 
-    
-    int64_t leftMotor  = sim.sim().getObjectHandle("/PioneerP3DX/leftMotor");
-    int64_t rightMotor = sim.sim().getObjectHandle("/PioneerP3DX/rightMotor");
-    int64_t robot      = sim.sim().getObjectHandle("/PioneerP3DX");
-    int64_t camera     = sim.sim().getObjectHandle("/PioneerP3DX/visionSensor");
-
-    auto& sp = SharedPerception::get();
-    sp.setup(&sim, robot, camera);
-    Handles handles = Handles::init(sp);
-
+    SimHandles handles = initSimulation(sim);
 
     BT::BehaviorTreeFactory factory;
-    factory.registerNodeType<AvoidObstacles>("AvoidObstacles", &sim);
-    factory.registerNodeType<ReachColor>("ReachColor", &sim);
-    factory.registerNodeType<GoToXY>("GoToXY", &sim);
-    factory.registerNodeType<Place>("Place", &sim);
-    factory.registerNodeType<Wander>("Wander", &sim);
-    auto tree = factory.createTreeFromFile("../plan/case1.xml");
+    auto tree = createBehaviorTree(factory, sim, "../plan/case1.xml");
     BT::TreeObserver observer(tree);
-
-    auto cubes = randomizeCubes(sim, seed,
-                                {"/GreenCube", "/RedCube", "/YellowCube", "/OrangeCube"},
-                                {"/PioneerP3DX", "/Bill"});
-    {
-        std::ofstream f(out + "/cubes_seed" + std::to_string(seed) + ".csv");
-        f << "cube,x,y\n";
-        for (const auto& c : cubes) f << c.path << ',' << c.x << ',' << c.y << '\n';
-    }
     auto blackboard = tree.rootBlackboard();
-    for (const auto& c : cubes) {
-        std::string cleanName = c.path.substr(1);         
-        blackboard->set(cleanName + "_x", c.x);
-        blackboard->set(cleanName + "_y", c.y);
-    }
-    int64_t billHandle = sim.sim().getObjectHandle("/Bill");
-    auto posBill = sim.sim().getObjectPosition(billHandle, -1);
-    blackboard->set("Bill_x", posBill[0]);
-    blackboard->set("Bill_y", posBill[1]);
+
+    setupEnvironmentAndBlackboard(sim, blackboard, seed, out);
+
     DecisionLogger::get().open(out + "/decisions_seed" + std::to_string(seed) + ".csv");
-
     sim.sim().startSimulation();
-    client.step();
 
-    std::string result = "TIMEOUT";
-    double pathLen = 0.0, px = 0.0, py = 0.0;
-    bool havePrev = false;
-    BT::NodeStatus st;
-
-
-    while (true) {
-        sp.exec([&](RemoteAPIObjects& s){ s.sim().handleVisionSensor(handles.camera); });
-        sp.newTick();
-        const double t = sp.time();
-        const auto pos = sp.position();
-        if (havePrev) pathLen += std::hypot(pos[0]-px, pos[1]-py);
-        px = pos[0]; py = pos[1]; havePrev = true;
-
-        BT::NodeStatus st;
-        try { st = tree.tickExactlyOnce(); }
-        catch (const std::exception& e) { std::cout << "[BT ERROR] " << e.what() << std::endl; result = "ERROR"; break; }
-        sp.waitWorkersDone(std::chrono::milliseconds(200));
-        sp.exec([&](RemoteAPIObjects&){ MotorArbitrator::getInstance().applyCommand(&sim, handles.leftMotor, handles.rightMotor); });
-        sp.exec([&](RemoteAPIObjects&){ client.step(); });
-        if (st != BT::NodeStatus::RUNNING) { result = (st == BT::NodeStatus::SUCCESS) ? "SUCCESS" : "FAILURE"; break; }
-        if (t > maxT) break;
-    }
+    auto [result, pathLen] = runSimulationLoop(client, sim, tree, handles, maxT);
 
     if (result != "SUCCESS") {
-        std::vector<std::tuple<long long, std::string, unsigned>> rows;
-        tree.applyVisitor([&](const BT::TreeNode* n) {
-            const auto& ns = observer.getStatistics(n->UID());
-            if (ns.last_result == BT::NodeStatus::FAILURE)
-                rows.emplace_back(ns.last_timestamp.count(), n->fullPath(), ns.failure_count);
-        });
-        std::sort(rows.rbegin(), rows.rend());            // i più recenti per primi
-        std::ofstream f(out + "/failures_seed" + std::to_string(seed) + ".txt");
-        for (size_t i = 0; i < rows.size() && i < 15; ++i)
-            f << std::get<0>(rows[i]) << " ms  " << std::get<1>(rows[i])
-            << "  failures=" << std::get<2>(rows[i]) << '\n';
+        logFailures(tree, observer, out, seed);
     }
 
     const double tEnd = SharedPerception::get().time();
     tree.haltTree();
     DecisionLogger::get().close();
 
-    const std::string summary = out + "/summary.csv";
+    saveTrialSummary(out, seed, result, tEnd, pathLen);
+
+    sim.sim().stopSimulation();
+
+    return 0;
+}
+
+
+
+SimHandles initSimulation(RemoteAPIObjects& sim) {
+    SimHandles h;
+    h.leftMotor  = sim.sim().getObjectHandle((G_ROBOT_NAME + "/leftMotor").c_str());
+    h.rightMotor = sim.sim().getObjectHandle((G_ROBOT_NAME + "/rightMotor").c_str());
+    h.robot      = sim.sim().getObjectHandle(G_ROBOT_NAME.c_str());
+    h.camera     = sim.sim().getObjectHandle((G_ROBOT_NAME + "/visionSensor").c_str());
+    
+    SharedPerception::get().setup(&sim, h.robot, h.camera);
+    return h;
+}
+
+BT::Tree createBehaviorTree(BT::BehaviorTreeFactory& factory, RemoteAPIObjects& sim, const std::string& xmlPath) {
+    factory.registerNodeType<AvoidObstacles>("AvoidObstacles", &sim);
+    factory.registerNodeType<ReachColor>("ReachColor", &sim);
+    factory.registerNodeType<GoToXY>("GoToXY", &sim);
+    factory.registerNodeType<Place>("Place", &sim);
+    factory.registerNodeType<Wander>("Wander", &sim);
+    factory.registerNodeType<MotorArbitrator>("MotorArbitrator");
+    
+    return factory.createTreeFromFile(xmlPath);
+}
+
+void setupEnvironmentAndBlackboard(RemoteAPIObjects& sim, const BT::Blackboard::Ptr& blackboard, unsigned seed, const std::string& outDir) {
+    auto cubes = randomizeCubes(sim, seed, G_CUBE_LIST, G_IGNORE_LIST);
+    {
+        std::ofstream f(outDir + "/cubes_seed" + std::to_string(seed) + ".csv");
+        f << "cube,x,y\n";
+        for (const auto& c : cubes) {
+            f << c.path << ',' << c.x << ',' << c.y << '\n';
+        }
+    }
+
+    for (const auto& c : cubes) {
+        std::string cleanName = c.path.substr(1);         
+        blackboard->set(cleanName + "_x", c.x);
+        blackboard->set(cleanName + "_y", c.y);
+    }
+
+    int64_t billHandle = sim.sim().getObjectHandle(G_BILL_NAME.c_str());
+    auto posBill = sim.sim().getObjectPosition(billHandle, -1);
+    blackboard->set("Bill_x", posBill[0]);
+    blackboard->set("Bill_y", posBill[1]);
+
+    blackboard->set("Motor", MotorCommand{});
+}
+
+std::pair<std::string, double> runSimulationLoop(RemoteAPIClient& client, RemoteAPIObjects& sim, BT::Tree& tree, 
+                                                 const SimHandles& handles, double maxT) {
+    std::string result = "TIMEOUT";
+    double pathLen = 0.0, px = 0.0, py = 0.0;
+    bool havePrev = false;
+
+    auto& sp = SharedPerception::get();
+    double lastSimTime = -1.0;
+
+    tree.tickExactlyOnce();
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+    while (true) {
+        const double simNow = sp.exec([](RemoteAPIObjects& s) { return s.sim().getSimulationTime(); });
+        if (simNow <= lastSimTime) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            continue;
+        }
+        sp.exec([&](RemoteAPIObjects& s) { s.sim().handleVisionSensor(handles.camera); });
+        
+        lastSimTime = simNow;
+        g_tickCount++;
+        
+
+        auto start_time = std::chrono::high_resolution_clock::now();
+
+        sp.newTick();
+
+        sp.waitArbitratorDone(std::chrono::milliseconds(150));
+
+        BT::NodeStatus st = tree.tickExactlyOnce();
+
+        auto end_time = std::chrono::high_resolution_clock::now();
+        auto duration_ms = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time).count();
+        const double t = sp.time();
+        const auto pos = sp.position();
+        if (havePrev)
+            pathLen += std::hypot(pos[0] - px, pos[1] - py);
+
+        px = pos[0];
+        py = pos[1];
+        havePrev = true;
+
+        if (st != BT::NodeStatus::RUNNING) {
+            result = (st == BT::NodeStatus::SUCCESS) ? "SUCCESS" : "FAILURE";
+            break;
+        }
+        if (t > maxT) break;
+    }
+
+    return {result, pathLen};
+}
+
+void logFailures(const BT::Tree& tree, const BT::TreeObserver& observer, const std::string& outDir, unsigned seed) {
+    std::vector<std::tuple<long long, std::string, unsigned>> rows;
+    tree.applyVisitor([&](const BT::TreeNode* n) {
+        const auto& ns = observer.getStatistics(n->UID());
+        if (ns.last_result == BT::NodeStatus::FAILURE) {
+            rows.emplace_back(ns.last_timestamp.count(), n->fullPath(), ns.failure_count);
+        }
+    });
+    
+    std::sort(rows.rbegin(), rows.rend());
+    std::ofstream f(outDir + "/failures_seed" + std::to_string(seed) + ".txt");
+    for (size_t i = 0; i < rows.size() && i < 15; ++i) {
+        f << std::get<0>(rows[i]) << " ms  " << std::get<1>(rows[i])
+          << "  failures=" << std::get<2>(rows[i]) << '\n';
+    }
+}
+
+void saveTrialSummary(const std::string& outDir, unsigned seed, const std::string& result, double simTime, double pathLen) {
+    const std::string summary = outDir + "/summary.csv";
     const bool exists = std::ifstream(summary).good();
     std::ofstream s(summary, std::ios::app);
 
     if (!exists) s << "seed,result,sim_time_s,path_m\n";
-    s << seed << ',' << result << ',' << tEnd << ',' << pathLen << '\n';
-    std::cout << "[TRIAL " << seed << "] " << result << " t=" << tEnd << "s path=" << pathLen << "m\n";
-
-    client.setStepping(false);
-    sim.sim().stopSimulation();
-
-    return 0;
+    s << seed << ',' << result << ',' << simTime << ',' << pathLen << '\n';
+    
+    std::cout << "[TRIAL " << seed << "] " << result 
+              << " t=" << simTime << "s path=" << pathLen << "m\n";
 }

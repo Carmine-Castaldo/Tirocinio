@@ -1,27 +1,43 @@
 <root BTCPP_format="4" main_tree_to_execute="MainTree1">
 
-<BehaviorTree ID="MainTree1">
-  <Parallel failure_count="1" success_count="2">
-    <SubTree ID="Task1" _autoremap="true" />
-    <SubTree ID="Task2" _autoremap="true" />
-  </Parallel>
+<BehaviorTree ID="MainTree1" Motor="{Motor}" _autoremap="true">
+  <Sequence>
+    <RunOnce>
+      <Script code="done_yellow := false; done_orange := false; done_green := false; done_red := false;
+                    placed_yellow := false; placed_orange := false; placed_green := false; placed_red := false;
+                    mu_t1_1 := 2.0; mu_t1_2 := 1.0; mu_t1_3 := 1.0; mu_t1_4 := 1.0;
+                    mu_t2_1 := 2.0; mu_t2_2 := 1.0; mu_t2_3 := 1.0; mu_t2_4 := 1.0;" />
+    </RunOnce>
+
+    <Parallel failure_count="1" success_count="2">
+      <SubTree ID="Task1" _autoremap="true" />
+      <SubTree ID="Task2" _autoremap="true" />
+      <MotorArbitrator Motor="{Motor}" />
+    </Parallel>
+  </Sequence>
 </BehaviorTree>
 
 <BehaviorTree ID="Task1">
   <Parallel failure_count="4" success_count="4">
-    <SubTree ID="Take"   Object="/YellowCube" Color="Yellow" X="{YellowCube_x}" Y="{YellowCube_y}" Done="{done_yellow}" _autoremap="true"/>
-    <SubTree ID="Take"   Object="/OrangeCube" Color="Orange" X="{OrangeCube_x}" Y="{OrangeCube_y}" Done="{done_orange}" _autoremap="true"/>
-    <SubTree ID="Return" Object="/YellowCube" Color="Yellow" X="{Bill_x}"       Y="{Bill_y}"       Done="{done_yellow}" _autoremap="true"/>
-    <SubTree ID="Return" Object="/OrangeCube" Color="Orange" X="{Bill_x}"       Y="{Bill_y}"       Done="{done_orange}" _autoremap="true"/>
+    <SubTree ID="Take"   Object="/YellowCube" Color="Yellow" X="{YellowCube_x}" Y="{YellowCube_y}" Done="{done_yellow}"   mu="{mu_t1_1}" _autoremap="true"
+             _onSuccess="mu_t1_2 := mu_t1_2 + 1.0" />
+    <SubTree ID="Take"   Object="/OrangeCube" Color="Orange" X="{OrangeCube_x}" Y="{OrangeCube_y}" Done="{done_orange}"   mu="{mu_t1_2}" _autoremap="true"
+             _onSuccess="mu_t1_3 := mu_t1_3 + 1.0" />
+    <SubTree ID="Return" Object="/YellowCube" Color="Yellow" X="{Bill_x}"       Y="{Bill_y}"       Done="{done_yellow}"   Placed="{placed_yellow}" mu="{mu_t1_3}" _autoremap="true"
+             _onSuccess="mu_t1_4 := mu_t1_4 + 1.0" />
+    <SubTree ID="Return" Object="/OrangeCube" Color="Orange" X="{Bill_x}"       Y="{Bill_y}"       Done="{done_orange}"   Placed="{placed_orange}" mu="{mu_t1_4}" _autoremap="true" />
   </Parallel>
 </BehaviorTree>
 
 <BehaviorTree ID="Task2">
   <Parallel failure_count="4" success_count="4">
-    <SubTree ID="Take"   Object="/GreenCube" Color="Green" X="{GreenCube_x}" Y="{GreenCube_y}"  Done="{done_green}" _autoremap="true"/>
-    <SubTree ID="Take"   Object="/RedCube"   Color="Red"   X="{RedCube_x}"   Y="{RedCube_y}"    Done="{done_red}"   _autoremap="true"/>
-    <SubTree ID="Return" Object="/GreenCube" Color="Green" X="{Bill_x}"      Y="{Bill_y}"       Done="{done_green}" _autoremap="true"/>
-    <SubTree ID="Return" Object="/RedCube"   Color="Red"   X="{Bill_x}"      Y="{Bill_y}"       Done="{done_red}"   _autoremap="true"/>
+    <SubTree ID="Take"   Object="/GreenCube" Color="Green" X="{GreenCube_x}" Y="{GreenCube_y}"  Done="{done_green}"   mu="{mu_t2_1}" _autoremap="true"
+             _onSuccess="mu_t2_2 := mu_t2_2 + 1.0" />
+    <SubTree ID="Take"   Object="/RedCube"   Color="Red"   X="{RedCube_x}"   Y="{RedCube_y}"    Done="{done_red}"     mu="{mu_t2_2}" _autoremap="true"
+             _onSuccess="mu_t2_3 := mu_t2_3 + 1.0" />
+    <SubTree ID="Return" Object="/GreenCube" Color="Green" X="{Bill_x}"      Y="{Bill_y}"       Done="{done_green}"   Placed="{placed_green}" mu="{mu_t2_3}" _autoremap="true"
+             _onSuccess="mu_t2_4 := mu_t2_4 + 1.0" />
+    <SubTree ID="Return" Object="/RedCube"   Color="Red"   X="{Bill_x}"      Y="{Bill_y}"       Done="{done_red}"     Placed="{placed_red}"   mu="{mu_t2_4}" _autoremap="true" />
   </Parallel>
 </BehaviorTree>
 
@@ -45,25 +61,26 @@
   </Parallel>
 </BehaviorTree>
 
-
 <BehaviorTree ID="FollowColor">
   <Parallel failure_count="1" success_count="1">
-    <AvoidObstacles name="avoid" Object="{Object}" />
-    <ReachColor name="ReachColor" Color="{Color}" Object="{Object}" knapsack="{knapsack}" Done="{Done}" mu="{mu}"/>
+    <AvoidObstacles name="avoid" Object="{Object}" Motor="{Motor}" />
+    <ReachColor name="ReachColor" Color="{Color}" Object="{Object}" knapsack="{knapsack}" Done="{Done}" mu="{mu}" Motor="{Motor}"/>
   </Parallel>
 </BehaviorTree>
 
 <BehaviorTree ID="ExploreXY">
   <Parallel failure_count="1" success_count="1">
-    <AvoidObstacles name="avoid" Object="{Object}" />
-    <GoToXY name="GoToXY" X="{X}" Y="{Y}" Object="{Object}" Done="{Done}" mu="{mu}"/>
-    <Wander name="wander" />
+    <AvoidObstacles name="avoid" Object="{Object}" Motor="{Motor}" />
+    <GoToXY name="GoToXY" X="{X}" Y="{Y}" Object="{Object}" Done="{Done}" mu="{mu}" Motor="{Motor}" />
+    <Wander name="wander" Motor="{Motor}" />
   </Parallel>
 </BehaviorTree>
 
 <BehaviorTree ID="PickUp">
   <Sequence>
-    <Place Object="{Object}" Color="{Color}" Target="knapsack" knapsack="{knapsack}" Done="{Done}" mu="{mu}"/>  
+    <Place Object="{Object}" Color="{Color}" Target="knapsack" knapsack="{knapsack}" 
+           Done="{Done}" mu="{mu}" Motor="{Motor}"
+           _onSuccess="Done := true" />  
   </Sequence>
 </BehaviorTree>
 
@@ -76,7 +93,9 @@
 
 <BehaviorTree ID="PutDown">
   <Sequence>
-    <Place Object="{Object}" Color="{Color}" Target="ground" knapsack="{knapsack}" mu="{mu}"/>
+    <Place Object="{Object}" Color="{Color}" Target="ground" knapsack="{knapsack}" 
+           Done="{Placed}" mu="{mu}" Motor="{Motor}"
+           _onSuccess="Placed := true" />
   </Sequence>
 </BehaviorTree>
 

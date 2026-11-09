@@ -70,7 +70,7 @@ AvoidObstacles::AvoidObstacles(const std::string& name, const BT::NodeConfig& co
             }
         }
 
-        const double t = SharedPerception::get().time();
+        const double t = sp.time();
         if (isObstacle) { holdUntil_ = t + kHoldSec; lastDistances_ = distances; lastMinDist_ = minDistance; }
         else if (t >= holdUntil_) turnSign_ = 0;
         lambda_ = saturatingLambda(isObstacle ? minDistance : lastMinDist_, 0.5, 1.0);
@@ -84,34 +84,37 @@ AvoidObstacles::AvoidObstacles(const std::string& name, const BT::NodeConfig& co
     bool AvoidObstacles::checkExternalReleaser(){
         return true;
     }
-    std::pair<double,double> AvoidObstacles::executeMotorSchema() {
-        const auto& d = isObstacle ? distances : lastDistances_;
 
-        double turn = 0.0, minDist = 999.0, minCenter = 999.0, leftSum = 0.0, rightSum = 0.0;
-        for (size_t i = 0; i < d.size(); ++i) {
-            if (d[i] <= 0.0) continue;
-            minDist = std::min(minDist, d[i]);
-            double w = 1.0 / (d[i] + 0.20);
-            if (sonarSide_[i] > 0) { turn -= w; leftSum  += w; }
-            else if (sonarSide_[i] < 0) { turn += w; rightSum += w; }
-            else                        { minCenter = std::min(minCenter, d[i]); }
-        }
+    std::pair<double, double> AvoidObstacles::executeMotorSchema() {
+    const auto& d = isObstacle ? distances : lastDistances_;
 
-        bool symmetric = std::abs(turn) < 0.3 * std::max(leftSum, rightSum);
-        if (minCenter < 999.0 || symmetric) {
-            if (turnSign_ == 0) turnSign_ = (leftSum > rightSum) ? -1 : +1;
-            turn += turnSign_ * (1.0 / (std::min(minCenter, minDist) + 0.20));
-        }
-
-        double v = 0.35;
-        if (minDist < 0.20) v = 0.05;
-        else if (minDist < 0.40) v = 0.18;
-
-        double w_gain = (minDist < 0.35) ? 0.55 : 0.35;
-        double w = std::clamp(turn * w_gain, -1.2, 1.2);
-
-        const double L = 0.331;
-        return { v - w * L / 2.0, v + w * L / 2.0 };
+    double turn = 0.0, minDist = 999.0, minCenter = 999.0, leftSum = 0.0, rightSum = 0.0;
+    for (size_t i = 0; i < d.size(); ++i) {
+        if (d[i] <= 0.0) continue;
+        minDist = std::min(minDist, d[i]);
+        double w = 1.0 / (d[i] + 0.20);
+        if (sonarSide_[i] > 0)      { turn -= w; leftSum  += w; }
+        else if (sonarSide_[i] < 0) { turn += w; rightSum += w; }
+        else                        { minCenter = std::min(minCenter, d[i]); }
     }
+
+    bool symmetric = std::abs(turn) < 0.3 * std::max(leftSum, rightSum);
+    if (minCenter < 999.0 || symmetric) {
+        if (turnSign_ == 0) turnSign_ = (leftSum > rightSum) ? -1 : +1;
+        turn += turnSign_ * (1.0 / (std::min(minCenter, minDist) + 0.20));
+    }
+
+    double v = 0.35;
+    if (minDist < 0.20)      v = 0.025;
+    else if (minDist < 0.40) v = 0.09;
+
     
-    
+    double w_gain = 40;
+
+    double w = std::clamp(turn * w_gain, -0.4, 0.4); 
+
+    const double L = 0.331;
+    return { v - w * L / 2.0, v + w * L / 2.0 };
+}
+
+

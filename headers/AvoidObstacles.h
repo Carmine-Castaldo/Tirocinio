@@ -19,8 +19,8 @@ private:
     bool isIgnored(int64_t detected);
     int  turnSign_= 0;
     double holdUntil_ = 0.0;
-    static constexpr double kHoldSec = 1.0;
-    static constexpr int kHold = 20;
+    static constexpr double kHoldSec = 0.5;
+    static constexpr int kHold = 10;
     std::vector<double> lastDistances_;
     std::vector<int> sonarSide_;
 

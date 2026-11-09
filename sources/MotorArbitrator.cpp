@@ -1,118 +1,95 @@
 #include "MotorArbitrator.h"
-#include "DecisionLogger.h"
 #include "SharedPerception.h"
+#include "MotorCommand.h"
+#include <chrono>
+#include <cmath>
 #include <iostream>
-#include <unordered_map>
-#include <algorithm>
 
-MotorArbitrator& MotorArbitrator::getInstance() {
-    static MotorArbitrator instance;
-    return instance;
+MotorArbitrator::MotorArbitrator(const std::string& name, const BT::NodeConfig& config)
+    : BT::ThreadedAction(name, config) {
+    auto& sp = SharedPerception::get();
+    leftMotor_  = sp.handle("/PioneerP3DX/leftMotor");
+    rightMotor_ = sp.handle("/PioneerP3DX/rightMotor");
 }
 
-void MotorArbitrator::reset() {
-    std::lock_guard<std::mutex> l(m_);
-    props_.clear();
-    proposals_.clear();
-    currentWinner_ = "none";
-    maxEmphasis_ = -1.0;
-    winningVLeft_ = 0.0;
-    winningVRight_ = 0.0;
+BT::PortsList MotorArbitrator::providedPorts() {
+    return { BT::BidirectionalPort<MotorCommand>("Motor") };
 }
 
-void MotorArbitrator::propose(uint64_t key, const std::string& id, double e, double vL, double vR, bool exclusive) {
-    if (e <= 0.0) return;
-    std::lock_guard<std::mutex> l(m_);
-    props_[key] = {id, e, vL, vR, exclusive};
+void MotorArbitrator::halt() {
+    SharedPerception::get().wake();
+    BT::ThreadedAction::halt();
 }
 
-void MotorArbitrator::withdraw(uint64_t key) {
-    std::lock_guard<std::mutex> l(m_);
-    props_.erase(key);
-}
+BT::NodeStatus MotorArbitrator::tick() {
+    auto& sp = SharedPerception::get();
+    std::string previousWinner = "none";
+    double prevVL = 1e9, prevVR = 1e9;
+    uint64_t seen = 0;
 
-bool MotorArbitrator::getWinningCommand(double& vLeft, double& vRight, std::string& winnerName, double& winnerEmphasis) const {
-    std::lock_guard<std::mutex> l(m_);
-    if (maxEmphasis_ < 0.0) return false;
+    while (!isHaltRequested()) {
+        if (!sp.waitNextTick(seen, [this] { return isHaltRequested(); })) continue;
+        sp.waitWorkersDone(std::chrono::milliseconds(500));
 
-    vLeft = winningVLeft_;
-    vRight = winningVRight_;
-    winnerName = currentWinner_;
-    winnerEmphasis = maxEmphasis_;
-    return true;
-}
+        std::string winner;
+        double vL = 0.0, vR = 0.0, emphasis = -1.0;
 
-void MotorArbitrator::applyCommand(RemoteAPIObjects* sim, int64_t leftMotor, int64_t rightMotor) {
-    {
-        std::lock_guard<std::mutex> l(m_);
-        proposals_.clear();
-        for (const auto& kv : props_) {
-            proposals_.push_back(kv.second);
-        }
-    }
+        {
+            std::lock_guard<std::mutex> lock(MotorCommand::lock());
+            MotorCommand cmd;
+            if (getInput("Motor", cmd)) {
+                winner   = cmd.owner;
+                emphasis = cmd.emphasis;
 
-    if (proposals_.empty()) return;
+                const bool hasWinner = !cmd.owner.empty() && cmd.emphasis > 0.0;
+                const bool hasAvoid  = !cmd.avoidOwner.empty() && cmd.avoidEmphasis > 0.0;
 
-    const Proposal* win = nullptr;
-    for (auto& p : proposals_) {
-        if (p.exclusive && (!win || p.emphasis > win->emphasis)) {
-            win = &p;
-        }
-    }
+                if (hasWinner && hasAvoid) {
+                    const double avoidRatio = cmd.avoidEmphasis / (cmd.emphasis + cmd.avoidEmphasis);
+                    const double goalRatio  = 1.0 - avoidRatio;
 
-    std::unordered_map<std::string, const Proposal*> uniq;
-    for (auto& p : proposals_) {
-        if (!p.exclusive) {
-            auto& s = uniq[p.id];
-            if (!s || p.emphasis > s->emphasis) {
-                s = &p;
+                    vL = (cmd.command.first  * goalRatio) + (cmd.avoidVL * avoidRatio);
+                    vR = (cmd.command.second * goalRatio) + (cmd.avoidVR * avoidRatio);
+                    winner = cmd.owner + "+avoid";
+
+                } else if (hasWinner) {
+                    vL = cmd.command.first;
+                    vR = cmd.command.second;
+                } else if (hasAvoid) {
+                    vL = cmd.avoidVL;
+                    vR = cmd.avoidVR;
+                    winner = "avoid";
+                    emphasis = cmd.avoidEmphasis;
+                }
+                setOutput("Motor", cmd);
             }
         }
+
+        const std::string currentWinner = winner.empty() ? "none" : winner;
+        const bool velChanged = std::abs(vL - prevVL) > 1e-4 || std::abs(vR - prevVR) > 1e-4;
+        const bool winChanged = currentWinner != previousWinner;
+
+        if (velChanged || winChanged) {
+            sp.exec([&](RemoteAPIObjects& s) {
+                try {
+                    if (velChanged) {
+                        s.sim().setJointTargetVelocity(leftMotor_,  vL / 0.0975);
+                        s.sim().setJointTargetVelocity(rightMotor_, vR / 0.0975);
+                    }
+                    if (winChanged) {
+
+                        s.sim().setStringSignal("active_behavior", currentWinner);
+                    }
+                } catch (const std::exception& e) {
+                    std::cout << "[MotorArbitrator] error: " << e.what() << std::endl;
+                }
+            });
+            prevVL = vL;
+            prevVR = vR;
+            previousWinner = currentWinner;
+        }
+
+        sp.arbitratorDone();
     }
-
-    double sE = 0.0, sL = 0.0, sR = 0.0;
-    const Proposal* top = nullptr;
-
-    auto add = [&](const Proposal* p) {
-        sE += p->emphasis;
-        sL += p->emphasis * p->vL;
-        sR += p->emphasis * p->vR;
-        if (!top || p->emphasis > top->emphasis) top = p;
-    };
-
-    if (win) add(win);
-    for (auto& kv : uniq) add(kv.second);
-
-    double vL = (sE > 0.0) ? (sL / sE) : 0.0;
-    double vR = (sE > 0.0) ? (sR / sE) : 0.0;
-    const std::string winner = top ? top->id : "none";
-
-     SharedPerception::get().exec([&](RemoteAPIObjects& s) {
-        if (winner != previousWinner_) {
-            previousWinner_ = winner;
-            std::cout << "[Motor Arbitrator] Winner: " << winner << std::endl;
-            try { s.sim().setStringSignal("active_behavior", winner); } catch (...) {}
-        }
-
-        if (leftMotor >= 0 && rightMotor >= 0) {
-            try {
-                s.sim().setJointTargetVelocity(leftMotor,  vL / 0.0975);
-                s.sim().setJointTargetVelocity(rightMotor, vR / 0.0975);
-            } catch (...) {
-                std::cout << "Exception in MotorArbitrator::applyCommand" << std::endl;
-            }
-        }
-    });
-
-    if (win) {
-        static std::string prevGoal;
-        if (win->id != prevGoal) {
-            prevGoal = win->id;
-            std::map<std::string, double> best;
-            for (const auto& p : proposals_)
-                if (p.exclusive) best[p.id] = std::max(best[p.id], p.emphasis);
-            std::vector<std::pair<std::string, double>> comp(best.begin(), best.end());
-            DecisionLogger::get().log(SharedPerception::get().time(), win->id, win->emphasis, comp);
-        }
-    }
+    return BT::NodeStatus::IDLE;
 }

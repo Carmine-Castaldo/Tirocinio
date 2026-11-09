@@ -42,9 +42,10 @@ bool Wander::checkExternalReleaser() {
 }
 
 std::pair<double, double> Wander::executeMotorSchema() {
-
+    
     double v = 0.2 * std::max(0.0, std::cos(angleError_));
-    double w = std::clamp(angleError_ * 1.0, -0.8, 0.8);
+    
+    double w = std::clamp(angleError_ * 0.5, -0.8, 0.8);
 
     double v_left  = v - w * 0.331 / 2.0;
     double v_right = v + w * 0.331 / 2.0;

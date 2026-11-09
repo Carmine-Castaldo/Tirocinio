@@ -149,24 +149,21 @@ bool ReachColor::isObjectInKnapsack(){
         return false;
     }
 }
-
 std::pair<double, double> ReachColor::executeMotorSchema() { 
-    
     if (distance_ <= 0.55) return {0.0, 0.0};
 
     double angle = std::atan2(relY_, relX_);
 
+
     double v_max = 0.40;
     if (distance_ < 1.0)
-        v_max = 0.15 + (distance_ / 1.0) * 0.25;
-    
+        v_max = 0.075 + (distance_ / 1.0) * 0.125;
     
     double v = 0.0;
     if (std::abs(angle) < (M_PI / 3.0))
         v = v_max * std::cos(angle);
-    
 
-    double w = std::clamp(angle * 1.8, -1.2, 1.2);
+    double w = std::clamp(angle * 0.9, -1.2, 1.2); 
 
     double L = 0.331;
     double v_left  = v - (w * L) / 2.0;

@@ -158,23 +158,33 @@ std::pair<std::string, double> runSimulationLoop(RemoteAPIClient& client, Remote
         };
 
         const auto t0 = clk::now();
-        const auto t1 = t0;
 
         lastSimTime = simNow;
         g_tickCount++;
 
+
+        const uint64_t reads  = MotorCommand::arbReadsTotal.load(std::memory_order_relaxed);
+        const uint64_t writes = MotorCommand::nodeWritesTotal.load(std::memory_order_relaxed);
+        const double ratio    = (writes > 0) ? static_cast<double>(reads) / writes : 0.0;
+        std::cout << "[NYQUIST] Letture Arbitro: " << reads
+                << " | Scritture Nodi: " << writes
+                << " | Rapporto f_arb / f_write = " << ratio << "x\n";
+
         sp.newTick(simNow);
         const auto t2 = clk::now();
-        sp.waitArbitratorDone();
+        //sp.waitArbitratorDone();
         const auto t3 = clk::now();
 
         BT::NodeStatus st = tree.tickExactlyOnce();
         const auto t4 = clk::now();
+        //sp.waitWorkersDone();
+        std::this_thread::sleep_until(t0 + std::chrono::milliseconds(10));
 
-        std::cout << "[PROF] tick " << g_tickCount << " t=" << simNow
-                  << " | newTick=" << ms(t1, t2)
-                  << " waitArb=" << ms(t2, t3) << " treeTick=" << ms(t3, t4)
-                  << " TOTAL=" << ms(t0, t4) << " ms | " << sp.profileReport() << std::endl;
+
+        // std::cout << "[PROF] tick " << g_tickCount << " t=" << simNow
+        //           << " | newTick=" << ms(t1, t2)
+        //           << " waitArb=" << ms(t2, t3) << " treeTick=" << ms(t3, t4)
+        //           << " TOTAL=" << ms(t0, t4) << " ms | " << sp.profileReport() << std::endl;
         const double t = sp.time();
         const auto pos = sp.position();
         if (havePrev)

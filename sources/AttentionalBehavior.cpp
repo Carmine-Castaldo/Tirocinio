@@ -78,27 +78,33 @@ std::string AttentionalBehavior::getProposalID() const {
     return getUniqueID() + "_" + std::to_string(UID());
 }
 
-void AttentionalBehavior::proposeCommand() {
+void AttentionalBehavior::proposeCommand(bool updated) {
     const std::string myID = getProposalID();
-    
+
     std::lock_guard<std::mutex> lock(MotorCommand::lock());
     MotorCommand cmd;
     if (!getInput("Motor", cmd)) return;
 
     if (exclusive()) {
+        if (cmd.owner == myID && !updated) return;
+
         if (cmd.owner == myID || emphasis_ > cmd.emphasis) {
             cmd.owner    = myID;
             cmd.emphasis = emphasis_;
             cmd.command  = {lastVL_, lastVR_};
             setOutput("Motor", cmd);
+            MotorCommand::nodeWritesTotal.fetch_add(1, std::memory_order_relaxed);
         }
     } else {
-        if (cmd.avoidOwner == myID || emphasis_ >= cmd.avoidEmphasis) {
+        if (cmd.avoidOwner == myID && !updated) return;
+
+        if (cmd.avoidOwner == myID || emphasis_ > cmd.avoidEmphasis) {
             cmd.avoidOwner    = myID;
             cmd.avoidEmphasis = emphasis_;
             cmd.avoidVL       = lastVL_;
             cmd.avoidVR       = lastVR_;
             setOutput("Motor", cmd);
+            MotorCommand::nodeWritesTotal.fetch_add(1, std::memory_order_relaxed);
         }
     }
 }
@@ -130,7 +136,7 @@ void AttentionalBehavior::withdrawCommand() {
 
 BT::NodeStatus AttentionalBehavior::tick() {
     const uint64_t key = UID();
-    sp.registerWorker();
+    //sp.registerWorker();
 
     struct WorkerScopeGuard {
         AttentionalBehavior* self;
@@ -139,7 +145,7 @@ BT::NodeStatus AttentionalBehavior::tick() {
         ~WorkerScopeGuard() {
             self->withdrawCommand();
             sp.withdrawGoal(key);
-            sp.unregisterWorker();
+            //sp.unregisterWorker();
         }
     } guard{this, sp, key};
 
@@ -153,14 +159,17 @@ BT::NodeStatus AttentionalBehavior::tick() {
         const double now = sp.time();
 
         try {
-            if (now >= nextActivation_ && evaluateCycle(now)) {
-                withdrawCommand();
-                sp.workerDone();
-                return BT::NodeStatus::SUCCESS;
+            bool updated = false;
+            if (now >= nextActivation_) {
+                if (evaluateCycle(now)) {
+                    withdrawCommand();
+                    return BT::NodeStatus::SUCCESS;
+                }
+                updated = true;
             }
 
             if (active_) {
-                proposeCommand();
+                proposeCommand(updated);
                 afterPropose();
             } else {
                 withdrawCommand();
@@ -170,7 +179,7 @@ BT::NodeStatus AttentionalBehavior::tick() {
             std::cout << "[" << name() << "] " << e.what() << '\n';
         }
 
-        sp.workerDone();
+        //sp.workerDone();
     }
 
     return BT::NodeStatus::IDLE;

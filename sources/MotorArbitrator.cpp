@@ -3,6 +3,7 @@
 #include <cmath>
 #include <iostream>
 #include <mutex>
+#include <thread>
 
 MotorArbitrator::MotorArbitrator(const std::string& name, const BT::NodeConfig& config)
     : BT::ThreadedAction(name, config) {
@@ -18,7 +19,7 @@ BT::PortsList MotorArbitrator::providedPorts() {
 }
 
 void MotorArbitrator::halt() {
-    SharedPerception::get().wake();
+    //SharedPerception::get().wake();
     BT::ThreadedAction::halt();
 }
 
@@ -30,6 +31,7 @@ MotorArbitrator::ArbitratedOutput MotorArbitrator::resolveCommand() {
     if (!getInput("Motor", cmd)) {
         return out;
     }
+    MotorCommand::arbReadsTotal.fetch_add(1, std::memory_order_relaxed);
 
     const bool hasWinner = !cmd.owner.empty() && cmd.emphasis > 0.0;
     const bool hasAvoid  = !cmd.avoidOwner.empty() && cmd.avoidEmphasis > 0.0;
@@ -72,7 +74,7 @@ void MotorArbitrator::applyToSimulator(const ArbitratedOutput& out,
         return;
     }
 
-    SharedPerception::get().exec([&](RemoteAPIObjects& s) {
+    const bool applied = SharedPerception::get().tryExec([&](RemoteAPIObjects& s) {
         try {
             if (velChanged) {
                 s.sim().setJointTargetVelocity(leftMotor_,  out.vL / kWheelRadius);
@@ -80,35 +82,32 @@ void MotorArbitrator::applyToSimulator(const ArbitratedOutput& out,
             }
             if (winChanged)
                 s.sim().setStringSignal("active_behavior", out.winner);
-            
         } catch (const std::exception& e) {
             std::cout << "[MotorArbitrator] error: " << e.what() << '\n';
         }
     });
 
-    prevVL         = out.vL;
-    prevVR         = out.vR;
-    previousWinner = out.winner;
+    if (applied) {
+        prevVL         = out.vL;
+        prevVR         = out.vR;
+        previousWinner = out.winner;
+    }
 }
 
+
 BT::NodeStatus MotorArbitrator::tick() {
-    auto& sp = SharedPerception::get();
     std::string previousWinner = "none";
     double prevVL = 1e9;
     double prevVR = 1e9;
-    uint64_t seen = 0;
 
     while (!isHaltRequested()) {
-        if (!sp.waitNextTick(seen, [this] { return isHaltRequested(); }))
-            continue;
+        //std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        const auto nextWake = std::chrono::steady_clock::now() + std::chrono::milliseconds(2);
         
-
-        sp.waitWorkersDone(/*kWorkersTimeout*/);
-
         const ArbitratedOutput out = resolveCommand();
         applyToSimulator(out, previousWinner, prevVL, prevVR);
-
-        sp.arbitratorDone();
+        if (isHaltRequested()) break;
+        std::this_thread::sleep_until(nextWake);
     }
 
     return BT::NodeStatus::IDLE;

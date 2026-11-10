@@ -43,6 +43,14 @@ public:
         return f(*sim_);
     }
 
+    template <class F>
+    bool tryExec(F&& f) {
+        std::unique_lock<std::recursive_mutex> lock(m_, std::try_to_lock);
+        if (!lock.owns_lock()) return false;
+        f(*sim_);
+        return true;
+    }
+
     int64_t robotHandle() {
         std::lock_guard<std::recursive_mutex> lock(m_);
         return robot_;
@@ -91,40 +99,6 @@ public:
         }
         return false;
     }
-
-    void registerWorker() {
-        std::lock_guard<std::recursive_mutex> lock(m_);
-        ++workers_;
-    }
-
-    void unregisterWorker() {
-        std::lock_guard<std::recursive_mutex> lock(m_);
-        --workers_;
-        cvDone_.notify_all();
-    }
-
-    void workerDone() {
-        std::lock_guard<std::recursive_mutex> lock(m_);
-        ++done_;
-        cvDone_.notify_all();
-    }
-
-    void waitWorkersDone(std::chrono::milliseconds timeout = std::chrono::milliseconds(50)) {
-        std::unique_lock<std::recursive_mutex> lock(m_);
-        cvDone_.wait_for(lock, timeout, [&] { return done_ >= workers_; });
-    }
-
-    void arbitratorDone() {
-        std::lock_guard<std::recursive_mutex> lock(m_);
-        arbDone_ = true;
-        cvDone_.notify_all();
-    }
-
-    void waitArbitratorDone(std::chrono::milliseconds timeout = std::chrono::milliseconds(50)) {
-        std::unique_lock<std::recursive_mutex> lock(m_);
-        cvDone_.wait_for(lock, timeout, [&] { return arbDone_; });
-    }
-
 
     std::vector<double> position() {
         std::lock_guard<std::recursive_mutex> lock(m_);
@@ -275,8 +249,8 @@ public:
     }
 
 private:
+
     static constexpr double kImageMaxAge = 0.2;
-    
     static constexpr double kSonarNear    = 1.0;
     static constexpr double kSonarIdleAge = 0.3;
 

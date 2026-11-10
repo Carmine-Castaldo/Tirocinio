@@ -49,7 +49,7 @@ protected:
     void taskAccomplished();
 
     std::string getProposalID() const;
-    void proposeCommand();
+    void proposeCommand(bool updated);
     void withdrawCommand();
 
 public:

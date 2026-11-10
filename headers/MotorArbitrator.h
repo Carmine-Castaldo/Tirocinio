@@ -11,7 +11,7 @@
 class MotorArbitrator : public BT::ThreadedAction {
 private:
     static constexpr double kWheelRadius = 0.0975;
-    static constexpr double kVelEpsilon  = 1e-4;
+    static constexpr double kVelEpsilon  = 5e-3; 
     static constexpr auto kWorkersTimeout = std::chrono::milliseconds(150);
 
     int64_t leftMotor_  = -1;

@@ -43,12 +43,11 @@ bool AttentionalBehavior::evaluateCycle(double now) {
     if (active_) {
         std::tie(lastVL_, lastVR_) = executeMotorSchema();
 
-        const bool stopped = (lastVL_ == 0.0 && lastVR_ == 0.0);
-        if (stopped && name() != "avoid") {
-            if (accomplishesTask()) 
+        if (isFinished()) {
+            if (accomplishesTask()) {
                 taskAccomplished();
-
-            return true; 
+            }
+            return true;
         }
     } else {
         lastVL_ = 0.0;
@@ -83,7 +82,6 @@ void AttentionalBehavior::proposeCommand() {
     const std::string myID = getProposalID();
     
     std::lock_guard<std::mutex> lock(MotorCommand::lock());
-    std::cout << "[Propose] " << myID << std::endl;
     MotorCommand cmd;
     if (!getInput("Motor", cmd)) return;
 

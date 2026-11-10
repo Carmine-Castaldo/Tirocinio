@@ -23,16 +23,10 @@ void AvoidObstacles::setupSensors() {
 
     sonarHandles_.clear();
     sonarSide_.clear();
-
     for (int i = 1; i <= 6; ++i) {
-        std::string sensorPath = "/PioneerP3DX/ultrasonicSensor[" + std::to_string(i) + "]";
-        int64_t h = sp.handle(sensorPath);
+        const int64_t h = sp.handle("/PioneerP3DX/ultrasonicSensor[" + std::to_string(i) + "]");
         sonarHandles_.push_back(h);
-
-        auto p = sp.objectPosition(h, robotHandle_);
-        double angle = std::atan2(p[1], p[0]);
-        
-        sonarSide_.push_back((angle > 0.35) ? +1 : (angle < -0.35 ? -1 : 0));
+        sonarSide_.push_back(sp.sonarSide(h));
     }
 
     distances_.assign(sonarHandles_.size(), -1.0);

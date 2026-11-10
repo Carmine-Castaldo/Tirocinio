@@ -41,6 +41,9 @@ protected:
 
 
     void resetState();
+    virtual bool isFinished() const {
+        return name() != "avoid" && lastVL_ == 0.0 && lastVR_ == 0.0;
+    }
     void updateEmphasis();
     bool evaluateCycle(double now);
     void taskAccomplished();

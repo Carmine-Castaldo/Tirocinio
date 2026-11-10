@@ -18,7 +18,7 @@ private:
 
     static constexpr double kWheelBase = 0.331;
     static constexpr double kMapLimit  = 7.5;
-    static constexpr double kStopDist  = 0.55;
+    static constexpr double kStopDist  = 0.75;
 
 public:
     GoToXY(const std::string& name, const BT::NodeConfig& config, RemoteAPIObjects* sim);

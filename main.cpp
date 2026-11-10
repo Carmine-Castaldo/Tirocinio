@@ -149,26 +149,32 @@ std::pair<std::string, double> runSimulationLoop(RemoteAPIClient& client, Remote
     while (true) {
         const double simNow = sp.exec([](RemoteAPIObjects& s) { return s.sim().getSimulationTime(); });
         if (simNow <= lastSimTime) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
             continue;
         }
-        sp.exec([&](RemoteAPIObjects& s) { s.sim().handleVisionSensor(handles.camera); });
-        
+        using clk = std::chrono::steady_clock;
+        auto ms = [](clk::time_point a, clk::time_point b) {
+            return std::chrono::duration_cast<std::chrono::milliseconds>(b - a).count();
+        };
+
+        const auto t0 = clk::now();
+        const auto t1 = t0;
+
         lastSimTime = simNow;
         g_tickCount++;
-        
-        std::cout << "################# TICK " << g_tickCount << " START #################" << std::endl;
 
-        auto start_time = std::chrono::high_resolution_clock::now();
-
-        sp.newTick();
+        sp.newTick(simNow);
+        const auto t2 = clk::now();
         sp.waitArbitratorDone();
+        const auto t3 = clk::now();
 
         BT::NodeStatus st = tree.tickExactlyOnce();
+        const auto t4 = clk::now();
 
-        auto end_time = std::chrono::high_resolution_clock::now();
-        auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
-        std::cout << "################# TICK " << g_tickCount << " ENDED (in " << ms <<")#################" << std::endl;
+        std::cout << "[PROF] tick " << g_tickCount << " t=" << simNow
+                  << " | newTick=" << ms(t1, t2)
+                  << " waitArb=" << ms(t2, t3) << " treeTick=" << ms(t3, t4)
+                  << " TOTAL=" << ms(t0, t4) << " ms | " << sp.profileReport() << std::endl;
         const double t = sp.time();
         const auto pos = sp.position();
         if (havePrev)

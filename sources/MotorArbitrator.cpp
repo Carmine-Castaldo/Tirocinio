@@ -62,7 +62,9 @@ void MotorArbitrator::applyToSimulator(const ArbitratedOutput& out,
                                        std::string& previousWinner,
                                        double& prevVL,
                                        double& prevVR) {
-    const bool velChanged = std::abs(out.vL - prevVL) > kVelEpsilon ||
+    const bool stopping   = out.vL == 0.0 && out.vR == 0.0 && (prevVL != 0.0 || prevVR != 0.0);
+    const bool velChanged = stopping ||
+                            std::abs(out.vL - prevVL) > kVelEpsilon ||
                             std::abs(out.vR - prevVR) > kVelEpsilon;
     const bool winChanged = out.winner != previousWinner;
 

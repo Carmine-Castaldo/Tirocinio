@@ -70,7 +70,7 @@ void ReachColor::updatePerceptualSchema() {
         if (targetHandle_ == -1) return;
 
         if (target_ == "/Bill") {
-            auto bp = sp.objectPosition(targetHandle_, -1);
+            auto bp = sp.worldPosition(targetHandle_);
             const auto& rp = sp.position();
             const double yaw = sp.orientation()[2];
             const double dx = bp[0] - rp[0], dy = bp[1] - rp[1];
@@ -95,17 +95,21 @@ void ReachColor::updatePerceptualSchema() {
         const double tol = (hue == 30.0 || hue == 60.0) ? 8.0 : 12.0;
 
         const int px = countHue(*imgPtr, hue, tol);
-
-        auto pos = sp.objectPosition(targetHandle_, robotHandle_);
-        relX_ = pos[0]; 
-        relY_ = pos[1];
-        distance_ = std::hypot(relX_, relY_);
-
-        isTargetVisible_ = (px >= 30/*kMinPixels*/) || (tracking_ && distance_ < 1.0);
-        tracking_ = isTargetVisible_;
-        if (isTargetVisible_) {
-            lambda_ = saturatingLambda(distance_, 1.0, 10.0);
+        const bool seen = (px >= 30/*kMinPixels*/);
+        if (seen || tracking_) {
+            const auto wp  = sp.worldPosition(targetHandle_);
+            const auto rp  = sp.position();
+            const double yaw = sp.orientation()[2];
+            const double dx = wp[0] - rp[0], dy = wp[1] - rp[1];
+            relX_ =  std::cos(yaw) * dx + std::sin(yaw) * dy;
+            relY_ = -std::sin(yaw) * dx + std::cos(yaw) * dy;
+            distance_ = std::hypot(relX_, relY_);
         }
+
+        isTargetVisible_ = seen || (tracking_ && distance_ < 1.0);
+        tracking_ = isTargetVisible_;
+        if (isTargetVisible_)
+            lambda_ = saturatingLambda(distance_, 1.0, 10.0);
 
     } catch (const std::exception& e) {
         tracking_ = false;
@@ -150,7 +154,7 @@ bool ReachColor::isObjectInKnapsack(){
     }
 }
 std::pair<double, double> ReachColor::executeMotorSchema() { 
-    if (distance_ <= 0.55) return {0.0, 0.0};
+    if (distance_ <= kStopDist) return {0.0, 0.0};
 
     double angle = std::atan2(relY_, relX_);
 

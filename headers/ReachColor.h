@@ -16,6 +16,7 @@ private:
     double distance_, relX_ = 0, relY_ = 0;
     int64_t robotHandle_ = -1, targetHandle_ = -1;
     bool isTargetVisible_ = false, tracking_ = false;
+    static constexpr double kStopDist  = 0.75;
     static constexpr double kDepthBg = 0.999;
     static constexpr double kFovDeg = 60.0;
     static constexpr double kNear = 0.05;

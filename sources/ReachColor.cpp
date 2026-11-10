@@ -154,16 +154,15 @@ std::pair<double, double> ReachColor::executeMotorSchema() {
 
     double angle = std::atan2(relY_, relX_);
 
-
-    double v_max = 0.40;
+    double v_max = 0.15;
     if (distance_ < 1.0)
-        v_max = 0.075 + (distance_ / 1.0) * 0.125;
+        v_max = 0.06 + (distance_ / 1.0) * 0.09;
     
     double v = 0.0;
     if (std::abs(angle) < (M_PI / 3.0))
         v = v_max * std::cos(angle);
 
-    double w = std::clamp(angle * 0.9, -1.2, 1.2); 
+    double w = std::clamp(angle * 0.5, -0.8, 0.8); 
 
     double L = 0.331;
     double v_left  = v - (w * L) / 2.0;

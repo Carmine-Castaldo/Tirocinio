@@ -1,9 +1,23 @@
-    #include "AvoidObstacles.h"
-    #include "SharedPerception.h"
+#include "AvoidObstacles.h"
+#include "SharedPerception.h"
+#include <algorithm>
+#include <cmath>
 
 AvoidObstacles::AvoidObstacles(const std::string& name, const BT::NodeConfig& config, RemoteAPIObjects* sim)
     : AttentionalBehavior(name, config), sim_(sim) {
-    
+    setupSensors();
+}
+
+BT::PortsList AvoidObstacles::providedPorts() {
+    BT::PortsList ports = {
+        BT::InputPort<std::string>("Object")
+    };
+    auto basePorts = AttentionalBehavior::providedPorts();
+    ports.insert(basePorts.begin(), basePorts.end());
+    return ports;
+}
+
+void AvoidObstacles::setupSensors() {
     auto& sp = SharedPerception::get();
     robotHandle_ = sp.handle("/PioneerP3DX");
 
@@ -16,105 +30,124 @@ AvoidObstacles::AvoidObstacles(const std::string& name, const BT::NodeConfig& co
         sonarHandles_.push_back(h);
 
         auto p = sp.objectPosition(h, robotHandle_);
-        double a = std::atan2(p[1], p[0]);
-        sonarSide_.push_back((a > 0.35) ? +1 : (a < -0.35 ? -1 : 0));
+        double angle = std::atan2(p[1], p[0]);
+        
+        sonarSide_.push_back((angle > 0.35) ? +1 : (angle < -0.35 ? -1 : 0));
     }
 
+    distances_.assign(sonarHandles_.size(), -1.0);
     lastDistances_.assign(sonarHandles_.size(), -1.0);
 }
 
-    BT::PortsList AvoidObstacles::providedPorts(){
-        BT::PortsList ports = {
-            BT::InputPort<std::string>("Object")
-        };
-        auto basePorts = AttentionalBehavior::providedPorts();
-        ports.insert(basePorts.begin(), basePorts.end());
-        return ports;
-    }
-
-    double AvoidObstacles::checkSonar(int64_t h) {
-        const auto& r = SharedPerception::get().sonar(h);
-        if (std::get<0>(r) == 1) {
-            int64_t det = std::get<3>(r);
-            if (!SharedPerception::get().isGoal(det) &&
-                !SharedPerception::get().inRobotTree(det))
-                return std::get<1>(r);
-        }
-        return -1;
-    }
-
-
-    void AvoidObstacles::updatePerceptualSchema() {
-        std::string path;
-        getInput("Object", path);
-        if (path != previousPath_) {
-            targetHandle_ = -1;
-            if (path.empty())
-                previousPath_ = path;
-            else {
-                try { targetHandle_ = SharedPerception::get().handle(path); previousPath_ = path; }
-                catch (...) {}
-            }
-        }
-        ignoredValid_ = false;
-        distances.assign(sonarHandles_.size(), -1.0);
-        for (size_t i = 0; i < sonarHandles_.size(); ++i)
-            distances[i] = checkSonar(sonarHandles_[i]);
-
-        isObstacle = false;
-        double minDistance = 999.0;
-        for (double d : distances) {
-            if (d > 0.0) {
-                isObstacle = true;
-                if (d < minDistance) minDistance = d;
-            }
-        }
-
-        const double t = sp.time();
-        if (isObstacle) { holdUntil_ = t + kHoldSec; lastDistances_ = distances; lastMinDist_ = minDistance; }
-        else if (t >= holdUntil_) turnSign_ = 0;
-        lambda_ = saturatingLambda(isObstacle ? minDistance : lastMinDist_, 0.5, 1.0);
-        
-    }
-
-    bool AvoidObstacles::checkInternalReleaser(){
-        return isObstacle || SharedPerception::get().time() < holdUntil_;
-    }
-
-    bool AvoidObstacles::checkExternalReleaser(){
-        return true;
-    }
-
-    std::pair<double, double> AvoidObstacles::executeMotorSchema() {
-    const auto& d = isObstacle ? distances : lastDistances_;
-
-    double turn = 0.0, minDist = 999.0, minCenter = 999.0, leftSum = 0.0, rightSum = 0.0;
-    for (size_t i = 0; i < d.size(); ++i) {
-        if (d[i] <= 0.0) continue;
-        minDist = std::min(minDist, d[i]);
-        double w = 1.0 / (d[i] + 0.20);
-        if (sonarSide_[i] > 0)      { turn -= w; leftSum  += w; }
-        else if (sonarSide_[i] < 0) { turn += w; rightSum += w; }
-        else                        { minCenter = std::min(minCenter, d[i]); }
-    }
-
-    bool symmetric = std::abs(turn) < 0.3 * std::max(leftSum, rightSum);
-    if (minCenter < 999.0 || symmetric) {
-        if (turnSign_ == 0) turnSign_ = (leftSum > rightSum) ? -1 : +1;
-        turn += turnSign_ * (1.0 / (std::min(minCenter, minDist) + 0.20));
-    }
-
-    double v = 0.35;
-    if (minDist < 0.20)      v = 0.025;
-    else if (minDist < 0.40) v = 0.09;
-
+double AvoidObstacles::checkSonar(int64_t h) {
+    const auto& result = SharedPerception::get().sonar(h);
+    const int state = std::get<0>(result);
     
-    double w_gain = 40;
-
-    double w = std::clamp(turn * w_gain, -0.4, 0.4); 
-
-    const double L = 0.331;
-    return { v - w * L / 2.0, v + w * L / 2.0 };
+    if (state == 1) {
+        const double dist = std::get<1>(result);
+        const int64_t detectedObj = std::get<3>(result);
+        
+        if (!SharedPerception::get().isGoal(detectedObj) &&
+            !SharedPerception::get().inRobotTree(detectedObj)) {
+            return dist;
+        }
+    }
+    return -1.0;
 }
 
+void AvoidObstacles::updateTargetHandle() {
+    std::string currentPath;
+    if (getInput("Object", currentPath) && currentPath != previousPath_) {
+        targetHandle_ = -1;
+        previousPath_ = currentPath;
+        if (!currentPath.empty()) {
+            try { targetHandle_ = SharedPerception::get().handle(currentPath);}
+            catch (...) {}
+        }
+    }
+}
 
+void AvoidObstacles::updatePerceptualSchema() {
+    updateTargetHandle();
+    
+    double minDistance = 999.0;
+    isObstacle_ = false;
+
+    for (size_t i = 0; i < sonarHandles_.size(); ++i) {
+        distances_[i] = checkSonar(sonarHandles_[i]);
+        if (distances_[i] > 0.0) {
+            isObstacle_ = true;
+            minDistance = std::min(minDistance, distances_[i]);
+        }
+    }
+
+    const double now = SharedPerception::get().time();
+    
+    if (isObstacle_) {
+        holdUntil_ = now + kHoldSec;
+        lastDistances_ = distances_;
+        lastMinDist_ = minDistance;
+    } else if (now >= holdUntil_)
+        turnSign_ = 0;
+    
+    double effectiveDist = isObstacle_ ? minDistance : lastMinDist_;
+    lambda_ = saturatingLambda(effectiveDist, 0.5, 1.0);
+}
+
+bool AvoidObstacles::checkInternalReleaser() {
+    return isObstacle_ || SharedPerception::get().time() < holdUntil_;
+}
+
+bool AvoidObstacles::checkExternalReleaser() {
+    return true;
+}
+
+std::pair<double, double> AvoidObstacles::executeMotorSchema() {
+    const auto& d = isObstacle_ ? distances_ : lastDistances_;
+
+    double turn = 0.0;
+    double minDist = 999.0;
+    double minCenterDist = 999.0;
+    double leftSum = 0.0;
+    double rightSum = 0.0;
+
+    for (size_t i = 0; i < d.size(); ++i) {
+        if (d[i] <= 0.0) continue;
+        
+        minDist = std::min(minDist, d[i]);
+        double weight = 1.0 / (d[i] + kRobotRadius); 
+        
+        if (sonarSide_[i] > 0) { 
+            turn -= weight; 
+            leftSum += weight; 
+        } else if (sonarSide_[i] < 0) { 
+            turn += weight; 
+            rightSum += weight; 
+        } else
+            minCenterDist = std::min(minCenterDist, d[i]); 
+    }
+
+    bool isSymmetric = std::abs(turn) < 0.3 * std::max(leftSum, rightSum);
+    if (minCenterDist < 999.0 || isSymmetric) {
+        if (turnSign_ == 0)
+            turnSign_ = (leftSum > rightSum) ? -1 : +1;
+        
+        turn += turnSign_ * (1.0 / (std::min(minCenterDist, minDist) + kRobotRadius));
+    }
+
+    double linearVel = 0.175;
+    double w_gain = 0.175;
+
+    if (minDist < 0.20) {
+        linearVel = 0.025;
+        w_gain = 0.275;
+    } else if (minDist < 0.40) 
+        linearVel = 0.09;
+
+    double w = std::clamp(turn * w_gain, -1.2, 1.2); 
+    
+    double v_left  = linearVel - (w * kWheelBase) / 2.0;
+    double v_right = linearVel + (w * kWheelBase) / 2.0;
+
+    return {v_left, v_right};
+}

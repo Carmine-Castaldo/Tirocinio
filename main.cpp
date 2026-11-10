@@ -141,6 +141,8 @@ std::pair<std::string, double> runSimulationLoop(RemoteAPIClient& client, Remote
     auto& sp = SharedPerception::get();
     double lastSimTime = -1.0;
 
+
+
     tree.tickExactlyOnce();
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
@@ -155,17 +157,18 @@ std::pair<std::string, double> runSimulationLoop(RemoteAPIClient& client, Remote
         lastSimTime = simNow;
         g_tickCount++;
         
+        std::cout << "################# TICK " << g_tickCount << " START #################" << std::endl;
 
         auto start_time = std::chrono::high_resolution_clock::now();
 
         sp.newTick();
-
-        sp.waitArbitratorDone(std::chrono::milliseconds(150));
+        sp.waitArbitratorDone();
 
         BT::NodeStatus st = tree.tickExactlyOnce();
 
         auto end_time = std::chrono::high_resolution_clock::now();
-        auto duration_ms = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time).count();
+        auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
+        std::cout << "################# TICK " << g_tickCount << " ENDED (in " << ms <<")#################" << std::endl;
         const double t = sp.time();
         const auto pos = sp.position();
         if (havePrev)

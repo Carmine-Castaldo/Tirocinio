@@ -72,7 +72,7 @@ std::pair<double, double> Place::executeMotorSchema() {
         auto robotPos = SharedPerception::get().position();
         std::vector<double> groundPos = {robotPos[0] + 0.4, robotPos[1] + 0.3, 0.05};
         SharedPerception::get().exec([&](RemoteAPIObjects& s) {
-            s.sim().setObjectParent(targetHandle_, -1, true); // <-- SPOSTATO DENTRO exec!
+            s.sim().setObjectParent(targetHandle_, -1, true); 
             s.sim().setObjectPosition(targetHandle_, -1, groundPos);
             s.sim().setObjectInt32Param(targetHandle_, s.sim().shapeintparam_static, 0);
             s.sim().setObjectInt32Param(targetHandle_, s.sim().shapeintparam_respondable, 1);

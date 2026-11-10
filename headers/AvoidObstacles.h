@@ -4,27 +4,36 @@
 #include "AttentionalBehavior.h"
 #include "RemoteAPIObjects.h"
 #include <vector>
+#include <unordered_set>
+#include <string>
 
 class AvoidObstacles : public AttentionalBehavior {
 private:
     RemoteAPIObjects* sim_;
-    std::vector<int64_t> sonarHandles_;
-    std::string target_;
-    int64_t targetHandle_ = -1, robotHandle_;
-    std::vector<double> distances;
+    int64_t robotHandle_ = -1;
+    int64_t targetHandle_ = -1;
     std::string previousPath_;
-    std::unordered_set<int64_t> ignored_;
-    bool isObstacle = false;
-    bool ignoredValid_ = false;
-    bool isIgnored(int64_t detected);
-    int  turnSign_= 0;
-    double holdUntil_ = 0.0;
-    static constexpr double kHoldSec = 0.5;
-    static constexpr int kHold = 10;
-    std::vector<double> lastDistances_;
-    std::vector<int> sonarSide_;
+    
 
+    std::vector<int> sonarSide_;
+    std::vector<double>  distances_;
+    std::vector<double>  lastDistances_;
+    std::vector<int64_t> sonarHandles_;
+
+    int    turnSign_ = 0;
+    bool   isObstacle_ = false;
+    double holdUntil_ = 0.0;
     double lastMinDist_ = 1.0;
+    
+
+    static constexpr double kHoldSec = 0.5;
+    static constexpr double kRobotRadius = 0.20;
+    static constexpr double kWheelBase = 0.331;
+
+    
+    double checkSonar(int64_t sonarHandle);
+    void setupSensors();
+    void updateTargetHandle();
 
 public:
     AvoidObstacles(const std::string& name, const BT::NodeConfig& config, RemoteAPIObjects* sim);
@@ -35,9 +44,8 @@ public:
     bool checkExternalReleaser() override;
     void updatePerceptualSchema() override;
     std::pair<double, double> executeMotorSchema() override;
-    double checkSonar(int64_t sonarHandle);
-    bool exclusive() const override {return false;} 
+    
+    bool exclusive() const override { return false; } 
 };
-
 
 #endif // AVOID_OBSTACLES_H

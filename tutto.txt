@@ -42,6 +42,9 @@ protected:
 
 
     void resetState();
+    virtual bool isFinished() const {
+        return name() != "avoid" && lastVL_ == 0.0 && lastVR_ == 0.0;
+    }
     void updateEmphasis();
     bool evaluateCycle(double now);
     void taskAccomplished();
@@ -174,7 +177,7 @@ private:
 
     static constexpr double kWheelBase = 0.331;
     static constexpr double kMapLimit  = 7.5;
-    static constexpr double kStopDist  = 0.55;
+    static constexpr double kStopDist  = 0.75;
 
 public:
     GoToXY(const std::string& name, const BT::NodeConfig& config, RemoteAPIObjects* sim);
@@ -202,7 +205,7 @@ public:
 class MotorArbitrator : public BT::ThreadedAction {
 private:
     static constexpr double kWheelRadius = 0.0975;
-    static constexpr double kVelEpsilon  = 1e-4;
+    static constexpr double kVelEpsilon  = 5e-3; 
     static constexpr auto kWorkersTimeout = std::chrono::milliseconds(150);
 
     int64_t leftMotor_  = -1;
@@ -267,14 +270,35 @@ struct MotorCommand {
 
 class Place : public AttentionalBehavior {
 private:
+    static constexpr double kActionSeconds = 2.5;
+    static constexpr double kMaxDistance   = 0.80;
+
     RemoteAPIObjects* sim_;
-    std::string objectPath_, target_, previousPath_;
-    std::vector<int> knapsack;
+    std::string objectPath_;
+    std::string target_;
+    std::string previousPath_;
+    std::vector<int> knapsack_;
     int64_t targetHandle_ = -1;
-    double distance = 999.0;
+    double distance_      = 999.0;
+
+    double startTime_ = -1.0;
+    bool finished_    = false;
+
+    void completeAction();
+
+protected:
+    bool isFinished() const override { return finished_; }
+
+    void resetState() {
+        AttentionalBehavior::resetState();
+        startTime_ = -1.0;
+        finished_  = false;
+    }
+
+    void afterPropose() override;
 
 public:
-    Place(const std::string& name, const BT::NodeConfig& config, RemoteAPIObjects* sim_);
+    Place(const std::string& name, const BT::NodeConfig& config, RemoteAPIObjects* sim);
 
     static BT::PortsList providedPorts();
 
@@ -282,11 +306,9 @@ public:
     bool checkExternalReleaser() override;
     void updatePerceptualSchema() override;
     std::pair<double, double> executeMotorSchema() override;
-
 };
 
 #endif // PLACE_H
-
 ===== ./headers/ReachColor.h =====
 #ifndef REACH_COLOR_H
 #define REACH_COLOR_H
@@ -306,6 +328,7 @@ private:
     double distance_, relX_ = 0, relY_ = 0;
     int64_t robotHandle_ = -1, targetHandle_ = -1;
     bool isTargetVisible_ = false, tracking_ = false;
+    static constexpr double kStopDist  = 0.75;
     static constexpr double kDepthBg = 0.999;
     static constexpr double kFovDeg = 60.0;
     static constexpr double kNear = 0.05;
@@ -331,7 +354,10 @@ public:
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
+#include <cmath>
 #include <functional>
+#include <map>
+#include <algorithm>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -364,6 +390,7 @@ public:
     template <class F>
     auto exec(F&& f) {
         std::lock_guard<std::recursive_mutex> lock(m_);
+       //ProfScope prof(*this, "exec");
         return f(*sim_);
     }
 
@@ -378,15 +405,16 @@ public:
     }
 
 
-    void newTick() {
+    void newTick(double simTime) {
         std::lock_guard<std::recursive_mutex> lock(m_);
         poseOk_ = false;
         treeOk_ = false;
         timeOk_ = false;
-        sonar_.clear();
+
+        worldPos_.clear();
 
         refreshPose();
-        t_      = sim_->sim().getSimulationTime();
+        t_      = simTime;
         timeOk_ = true;
 
         updateBestGoal();
@@ -405,7 +433,7 @@ public:
 
     bool waitNextTick(uint64_t& seen, const std::function<bool()>& stop) {
         std::unique_lock<std::recursive_mutex> lock(m_);
-        cv_.wait_for(lock, std::chrono::milliseconds(5), [&] {
+        cv_.wait_for(lock, std::chrono::milliseconds(50), [&] {
             return seq_ > seen || stop();
         });
         if (seq_ > seen) {
@@ -472,16 +500,24 @@ public:
 
     Sonar sonar(int64_t h) {
         std::lock_guard<std::recursive_mutex> lock(m_);
+        
         auto it = sonar_.find(h);
-        if (it == sonar_.end()) {
-            it = sonar_.emplace(h, sim_->sim().readProximitySensor(h)).first;
+        if (it != sonar_.end()) {
+            const Sonar& s    = it->second.reading;
+            const bool near   = std::get<0>(s) == 1 && std::get<1>(s) < kSonarNear;
+            const double maxAge = near ? 0.0 : kSonarIdleAge;
+            if (t_ - it->second.time <= maxAge) return s;
         }
-        return it->second;
+       //ProfScope prof(*this, "sonar");
+        SonarEntry e{sim_->sim().readProximitySensor(h), t_};
+        it = sonar_.insert_or_assign(h, std::move(e)).first;
+        return it->second.reading;
     }
 
     bool inRobotTree(int64_t h) {
         std::lock_guard<std::recursive_mutex> lock(m_);
         if (!treeOk_) {
+           //ProfScope prof(*this, "robotTree");
             tree_.clear();
             for (int64_t obj : sim_->sim().getObjectsInTree(robot_))
                 tree_.insert(obj);
@@ -493,10 +529,12 @@ public:
 
     std::shared_ptr<const std::vector<unsigned char>> image() {
         std::lock_guard<std::recursive_mutex> lock(m_);
-        if (imgSeq_ != seq_ || !img_) {
-            auto r  = sim_->sim().getVisionSensorImg(camera_);
-            img_    = std::make_shared<std::vector<unsigned char>>(std::move(std::get<0>(r)));
-            imgSeq_ = seq_;
+        if (!img_ || t_ - imgTime_ >= kImageMaxAge) {
+           //ProfScope prof(*this, "image");
+            sim_->sim().handleVisionSensor(camera_);
+            auto r   = sim_->sim().getVisionSensorImg(camera_);
+            img_     = std::make_shared<std::vector<unsigned char>>(std::move(std::get<0>(r)));
+            imgTime_ = t_;
         }
         return img_;
     }
@@ -507,6 +545,7 @@ public:
         if (it != handles_.end())
             return it->second;
 
+       //ProfScope prof(*this, "handle");
         const int64_t h = sim_->sim().getObjectHandle(path);
         handles_[path]  = h;
         return h;
@@ -514,11 +553,35 @@ public:
 
     std::vector<double> objectPosition(int64_t h, int64_t relativeTo) {
         std::lock_guard<std::recursive_mutex> lock(m_);
+       //ProfScope prof(*this, "objPos");
         return sim_->sim().getObjectPosition(h, relativeTo);
+    }
+
+    int sonarSide(int64_t sensor) {
+        std::lock_guard<std::recursive_mutex> lock(m_);
+        auto it = sonarSide_.find(sensor);
+        if (it == sonarSide_.end()) {
+           //ProfScope prof(*this, "sonarSide");
+            const auto p     = sim_->sim().getObjectPosition(sensor, robot_);
+            const double ang = std::atan2(p[1], p[0]);
+            it = sonarSide_.emplace(sensor, (ang > 0.35) ? +1 : (ang < -0.35 ? -1 : 0)).first;
+        }
+        return it->second;
+    }
+
+    std::vector<double> worldPosition(int64_t h) {
+        std::lock_guard<std::recursive_mutex> lock(m_);
+        auto it = worldPos_.find(h);
+        if (it == worldPos_.end()) {
+           //ProfScope prof(*this, "worldPos");
+            it = worldPos_.emplace(h, sim_->sim().getObjectPosition(h, -1)).first;
+        }
+        return it->second;
     }
 
     double distanceTo(const std::string& path) {
         std::lock_guard<std::recursive_mutex> lock(m_);
+       //ProfScope prof(*this, "distTo");
         return sim_->getDistanceTo(path);
     }
 
@@ -533,12 +596,24 @@ public:
         offers_.erase(key);
     }
 
+    std::string profileReport() {
+        std::lock_guard<std::recursive_mutex> lock(m_);
+        std::vector<std::pair<std::string, ProfEntry>> v(prof_.begin(), prof_.end());
+        prof_.clear();
+        std::sort(v.begin(), v.end(), [](const auto& a, const auto& b) { return a.second.us > b.second.us; });
+        std::string out;
+        for (const auto& [tag, e] : v)
+            out += tag + " n=" + std::to_string(e.n) + " " + std::to_string(e.us / 1000) + "ms | ";
+        return out;
+    }
+
     bool isGoal(int64_t detected) {
         std::lock_guard<std::recursive_mutex> lock(m_);
         if (goal_ < 0 || detected < 0) return false;
         if (detected == goal_) return true;
 
         if (goalTreeFor_ != goal_) {
+           //ProfScope prof(*this, "goalTree");
             goalTree_.clear();
             try {
                 for (int64_t obj : sim_->sim().getObjectsInTree(goal_)) {
@@ -551,6 +626,27 @@ public:
     }
 
 private:
+    static constexpr double kImageMaxAge = 0.2;
+    
+    static constexpr double kSonarNear    = 1.0;
+    static constexpr double kSonarIdleAge = 0.3;
+
+    struct ProfEntry { int n = 0; long long us = 0; };
+    std::map<std::string, ProfEntry> prof_;
+
+    struct ProfScope {
+        SharedPerception& sp;
+        const char* tag;
+        std::chrono::steady_clock::time_point t0 = std::chrono::steady_clock::now();
+        ProfScope(SharedPerception& s, const char* t) : sp(s), tag(t) {}
+        ~ProfScope() {
+            auto& e = sp.prof_[tag];
+            ++e.n;
+            e.us += std::chrono::duration_cast<std::chrono::microseconds>(
+                        std::chrono::steady_clock::now() - t0).count();
+        }
+    };
+
     struct GoalOffer {
         int64_t handle  = -1;
         double emphasis = -1.0;
@@ -560,8 +656,13 @@ private:
 
     void refreshPose() {
         if (poseOk_) return;
-        pos_    = sim_->sim().getObjectPosition(robot_, -1);
-        ori_    = sim_->sim().getObjectOrientation(robot_, -1);
+        ProfScope prof(*this, "pose");
+        
+        const std::vector<double> q = sim_->sim().getObjectPose(robot_, -1);
+        pos_    = {q[0], q[1], q[2]};
+        const double yaw = std::atan2(2.0 * (q[6] * q[5] + q[3] * q[4]),
+                                      1.0 - 2.0 * (q[4] * q[4] + q[5] * q[5]));
+        ori_    = {0.0, 0.0, yaw};
         poseOk_ = true;
     }
 
@@ -594,10 +695,13 @@ private:
     std::vector<double> pos_;
     std::vector<double> ori_;
     double t_ = 0.0;
-    std::unordered_map<int64_t, Sonar> sonar_;
+    struct SonarEntry { Sonar reading; double time = -1e9; };
+    std::unordered_map<int64_t, SonarEntry> sonar_;
+    std::unordered_map<int64_t, std::vector<double>> worldPos_;
+    std::unordered_map<int64_t, int> sonarSide_;
     std::unordered_set<int64_t> tree_;
     std::shared_ptr<std::vector<unsigned char>> img_;
-    uint64_t imgSeq_ = 0;
+    double imgTime_ = -1e9;
 
     std::unordered_map<std::string, int64_t> handles_;
     std::unordered_map<uint64_t, GoalOffer> offers_;
@@ -837,26 +941,33 @@ std::pair<std::string, double> runSimulationLoop(RemoteAPIClient& client, Remote
     while (true) {
         const double simNow = sp.exec([](RemoteAPIObjects& s) { return s.sim().getSimulationTime(); });
         if (simNow <= lastSimTime) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
             continue;
         }
-        sp.exec([&](RemoteAPIObjects& s) { s.sim().handleVisionSensor(handles.camera); });
-        
+        using clk = std::chrono::steady_clock;
+        auto ms = [](clk::time_point a, clk::time_point b) {
+            return std::chrono::duration_cast<std::chrono::milliseconds>(b - a).count();
+        };
+
+        const auto t0 = clk::now();
+        const auto t1 = t0;
+
         lastSimTime = simNow;
         g_tickCount++;
-        
-        std::cout << "################# TICK " << g_tickCount << " START #################" << std::endl;
-
-        auto start_time = std::chrono::high_resolution_clock::now();
-
-        sp.newTick();
+        std::cout << "=============TICK " << g_tickCount << " START=============" << std::endl;
+        sp.newTick(simNow);
+        const auto t2 = clk::now();
         sp.waitArbitratorDone();
-
+        const auto t3 = clk::now();
+        
         BT::NodeStatus st = tree.tickExactlyOnce();
+        const auto t4 = clk::now();
+        std::cout << "=============TICK " << g_tickCount << " END=============" << std::endl;
+        // std::cout << "[PROF] tick " << g_tickCount << " t=" << simNow
+        //           << " | newTick=" << ms(t1, t2)
+        //           << " waitArb=" << ms(t2, t3) << " treeTick=" << ms(t3, t4)
+        //           << " TOTAL=" << ms(t0, t4) << " ms | " << sp.profileReport() << std::endl;
 
-        auto end_time = std::chrono::high_resolution_clock::now();
-        auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
-        std::cout << "################# TICK " << g_tickCount << " ENDED (in " << ms <<")#################" << std::endl;
         const double t = sp.time();
         const auto pos = sp.position();
         if (havePrev)
@@ -1044,7 +1155,7 @@ void saveTrialSummary(const std::string& outDir, unsigned seed, const std::strin
 </BehaviorTree>
 
 <BehaviorTree ID="GoToObject">
-  <Parallel failure_count="2" success_count="1">
+  <Parallel failure_count="2" success_count="1" _skipIf>
     <SubTree ID="FollowColor" _autoremap="true"/>
     <ForceFailure>
       <SubTree ID="ExploreXY" _autoremap="true"/>
@@ -1137,12 +1248,11 @@ bool AttentionalBehavior::evaluateCycle(double now) {
     if (active_) {
         std::tie(lastVL_, lastVR_) = executeMotorSchema();
 
-        const bool stopped = (lastVL_ == 0.0 && lastVR_ == 0.0);
-        if (stopped && name() != "avoid") {
-            if (accomplishesTask()) 
+        if (isFinished()) {
+            if (accomplishesTask()) {
                 taskAccomplished();
-
-            return true; 
+            }
+            return true;
         }
     } else {
         lastVL_ = 0.0;
@@ -1177,7 +1287,7 @@ void AttentionalBehavior::proposeCommand() {
     const std::string myID = getProposalID();
     
     std::lock_guard<std::mutex> lock(MotorCommand::lock());
-    std::cout << "[Propose] " << myID << std::endl;
+    std::cout << "New Propose: " << myID << std::endl; 
     MotorCommand cmd;
     if (!getInput("Motor", cmd)) return;
 
@@ -1306,16 +1416,10 @@ void AvoidObstacles::setupSensors() {
 
     sonarHandles_.clear();
     sonarSide_.clear();
-
     for (int i = 1; i <= 6; ++i) {
-        std::string sensorPath = "/PioneerP3DX/ultrasonicSensor[" + std::to_string(i) + "]";
-        int64_t h = sp.handle(sensorPath);
+        const int64_t h = sp.handle("/PioneerP3DX/ultrasonicSensor[" + std::to_string(i) + "]");
         sonarHandles_.push_back(h);
-
-        auto p = sp.objectPosition(h, robotHandle_);
-        double angle = std::atan2(p[1], p[0]);
-        
-        sonarSide_.push_back((angle > 0.35) ? +1 : (angle < -0.35 ? -1 : 0));
+        sonarSide_.push_back(sp.sonarSide(h));
     }
 
     distances_.assign(sonarHandles_.size(), -1.0);
@@ -1587,7 +1691,9 @@ void MotorArbitrator::applyToSimulator(const ArbitratedOutput& out,
                                        std::string& previousWinner,
                                        double& prevVL,
                                        double& prevVR) {
-    const bool velChanged = std::abs(out.vL - prevVL) > kVelEpsilon ||
+    const bool stopping   = out.vL == 0.0 && out.vR == 0.0 && (prevVL != 0.0 || prevVR != 0.0);
+    const bool velChanged = stopping ||
+                            std::abs(out.vL - prevVL) > kVelEpsilon ||
                             std::abs(out.vR - prevVR) > kVelEpsilon;
     const bool winChanged = out.winner != previousWinner;
 
@@ -1637,94 +1743,136 @@ BT::NodeStatus MotorArbitrator::tick() {
     return BT::NodeStatus::IDLE;
 }
 ===== ./sources/Place.cpp =====
-    #include "Place.h"
-    #include "SharedPerception.h"
+#include "Place.h"
+#include "SharedPerception.h"
+#include <algorithm>
 
-    Place::Place(const std::string& name, const BT::NodeConfig& config, RemoteAPIObjects* sim)
-        : AttentionalBehavior(name, config), sim_(sim) {}
+Place::Place(const std::string& name, const BT::NodeConfig& config, RemoteAPIObjects* sim)
+    : AttentionalBehavior(name, config), sim_(sim) {}
 
-    BT::PortsList Place::providedPorts(){
-        BT::PortsList ports = {
-            BT::InputPort<std::string>("Object"),
-            BT::InputPort<std::string>("Color"),
-            BT::InputPort<std::string>("Target"),
-            BT::BidirectionalPort<bool>("Done"),
-            BT::BidirectionalPort<std::vector<int>>("knapsack")
-        };
-        auto basePorts = AttentionalBehavior::providedPorts();
-        ports.insert(basePorts.begin(), basePorts.end());
-        return ports;
+BT::PortsList Place::providedPorts() {
+    BT::PortsList ports = {
+        BT::InputPort<std::string>("Object"),
+        BT::InputPort<std::string>("Color"),
+        BT::InputPort<std::string>("Target"),
+        BT::BidirectionalPort<bool>("Done"),
+        BT::BidirectionalPort<std::vector<int>>("knapsack")
+    };
+    auto basePorts = AttentionalBehavior::providedPorts();
+    ports.insert(basePorts.begin(), basePorts.end());
+    return ports;
+}
+
+bool Place::checkInternalReleaser() {
+    if (targetHandle_ == -1) return false;
+
+    const bool inKnapsack = std::find(knapsack_.begin(), knapsack_.end(),
+                                      static_cast<int>(targetHandle_)) != knapsack_.end();
+    if (target_ == "ground") {
+        return inKnapsack;
+    }
+    return knapsack_.size() < 4 && !inKnapsack;
+}
+
+bool Place::checkExternalReleaser() {
+    if (startTime_ >= 0.0) return true;
+    bool isDone = false;
+    getInput("Done", isDone);
+    if (target_ == "knapsack" && isDone) return false;
+
+    return distance_ < kMaxDistance;
+}
+
+void Place::updatePerceptualSchema() {
+    getInput("Target", target_);
+    getInput("Object", objectPath_);
+    getInput("knapsack", knapsack_);
+
+    if (!objectPath_.empty() && objectPath_ != previousPath_) {
+        targetHandle_ = sp.handle(objectPath_);
+        previousPath_ = objectPath_;
     }
 
-    bool Place::checkInternalReleaser(){
-        if (targetHandle_ == -1) return false;
-        bool inKnapsack = (std::find(knapsack.begin(), knapsack.end(), static_cast<int>(targetHandle_)) != knapsack.end());
-        if (target_ == "ground")return inKnapsack;
-        else return (knapsack.size() < 4 && !inKnapsack);
+    distance_ = 999.0;
+    try {
+        distance_ = sp.distanceTo(target_ == "ground" ? "/Bill" : objectPath_);
+    } catch (...) {}
+
+    if (startTime_ >= 0.0 || distance_ < kMaxDistance) {
+        lambda_ = kMinLambda;
+    } else {
+        lambda_ = saturatingLambda(distance_, 0.5, 1.0);
     }
-
-    bool Place::checkExternalReleaser(){
-        bool isDone = false;
-        getInput("Done", isDone);
-
-        if (target_ == "knapsack" && isDone ) return false;      
-
-        return (distance < 0.6);
-    }
-
-    void Place::updatePerceptualSchema() {
-        getInput("Target", target_);
-        getInput("Object", objectPath_);
-        getInput("knapsack", knapsack);
-        if (!objectPath_.empty() && objectPath_ != previousPath_) {
-            targetHandle_ = SharedPerception::get().handle(objectPath_);
-            previousPath_ = objectPath_;
-        }
-        distance = 999.0;
-        try {
-            distance = SharedPerception::get().distanceTo(target_ == "ground" ? "/Bill" : objectPath_);
-        } catch (...) {}
-    
-        lambda_ = saturatingLambda(distance, 0.5, 1.0);
-    }
+}
 
 std::pair<double, double> Place::executeMotorSchema() {
+    const double now = sp.time();
+    if (startTime_ < 0.0)
+        startTime_ = now;
+    
+
+    if (now - startTime_ < kActionSeconds) {
+        return {0.0, 0.0};
+    }
+
+    completeAction();
+    finished_ = true;
+    return {0.0, 0.0};
+}
+
+void Place::completeAction() {
     if (target_ == "knapsack") {
-        size_t n = knapsack.size();
-        int index = n + 6;
-        std::string connectionPath = "/PioneerP3DX/connection[" + std::to_string(index) + "]";
+        const size_t n = knapsack_.size();
+        const int index = static_cast<int>(n) + 6;
+        const std::string connectionPath = "/PioneerP3DX/connection[" + std::to_string(index) + "]";
+
         try {
-            SharedPerception::get().exec([&](RemoteAPIObjects& s) {
-                int64_t connHandle = s.sim().getObjectHandle(connectionPath);
+            const int64_t connHandle = sp.handle(connectionPath);
+            sp.exec([&](RemoteAPIObjects& s) {
                 s.sim().setObjectInt32Param(targetHandle_, s.sim().shapeintparam_static, 1);
                 s.sim().setObjectInt32Param(targetHandle_, s.sim().shapeintparam_respondable, 0);
                 s.sim().resetDynamicObject(targetHandle_);
                 s.sim().setObjectParent(targetHandle_, connHandle, false);
                 s.sim().setObjectPosition(targetHandle_, connHandle, {0.0, 0.0, 0.05});
             });
-            if (std::find(knapsack.begin(), knapsack.end(), static_cast<int>(targetHandle_)) == knapsack.end())
-                knapsack.push_back(static_cast<int>(targetHandle_));
+
+            if (std::find(knapsack_.begin(), knapsack_.end(), static_cast<int>(targetHandle_)) == knapsack_.end()) {
+                knapsack_.push_back(static_cast<int>(targetHandle_));
+            }
             setOutput("Done", true);
-            setOutput("knapsack", knapsack);
+            setOutput("knapsack", knapsack_);
         } catch (...) {}
+
     } else if (target_ == "ground") {
-        auto robotPos = SharedPerception::get().position();
-        std::vector<double> groundPos = {robotPos[0] + 0.4, robotPos[1] + 0.3, 0.05};
-        SharedPerception::get().exec([&](RemoteAPIObjects& s) {
-            s.sim().setObjectParent(targetHandle_, -1, true); 
-            s.sim().setObjectPosition(targetHandle_, -1, groundPos);
-            s.sim().setObjectInt32Param(targetHandle_, s.sim().shapeintparam_static, 0);
-            s.sim().setObjectInt32Param(targetHandle_, s.sim().shapeintparam_respondable, 1);
-            s.sim().resetDynamicObject(targetHandle_);
-        });
-        auto it = std::find(knapsack.begin(), knapsack.end(), static_cast<int>(targetHandle_));
-        if (it != knapsack.end()) knapsack.erase(it);
-        setOutput("Done", false);
-        setOutput("knapsack", knapsack);
+        const auto robotPos = sp.position();
+        const std::vector<double> groundPos = {robotPos[0] + 0.4, robotPos[1] + 0.3, 0.05};
+
+        try {
+            sp.exec([&](RemoteAPIObjects& s) {
+                s.sim().setObjectParent(targetHandle_, -1, true);
+                s.sim().setObjectPosition(targetHandle_, -1, groundPos);
+                s.sim().setObjectInt32Param(targetHandle_, s.sim().shapeintparam_static, 0);
+                s.sim().setObjectInt32Param(targetHandle_, s.sim().shapeintparam_respondable, 1);
+                s.sim().resetDynamicObject(targetHandle_);
+            });
+
+            auto it = std::find(knapsack_.begin(), knapsack_.end(), static_cast<int>(targetHandle_));
+            if (it != knapsack_.end())
+                knapsack_.erase(it);
+            
+            setOutput("Done", false);
+            setOutput("knapsack", knapsack_);
+        } catch (...) {}
     }
-    return {0.0, 0.0};
 }
 
+void Place::afterPropose(){
+    int64_t goalHandle = targetHandle_;
+    if (target_ == "ground") 
+        goalHandle = sp.handle("/Bill");
+    if (goalHandle >= 0)
+        sp.offerGoal(UID(), goalHandle, emphasis_);
+}
 ===== ./sources/ReachColor.cpp =====
 #include "ReachColor.h"
 #include "SharedPerception.h" 
@@ -1798,7 +1946,7 @@ void ReachColor::updatePerceptualSchema() {
         if (targetHandle_ == -1) return;
 
         if (target_ == "/Bill") {
-            auto bp = sp.objectPosition(targetHandle_, -1);
+            auto bp = sp.worldPosition(targetHandle_);
             const auto& rp = sp.position();
             const double yaw = sp.orientation()[2];
             const double dx = bp[0] - rp[0], dy = bp[1] - rp[1];
@@ -1823,17 +1971,21 @@ void ReachColor::updatePerceptualSchema() {
         const double tol = (hue == 30.0 || hue == 60.0) ? 8.0 : 12.0;
 
         const int px = countHue(*imgPtr, hue, tol);
-
-        auto pos = sp.objectPosition(targetHandle_, robotHandle_);
-        relX_ = pos[0]; 
-        relY_ = pos[1];
-        distance_ = std::hypot(relX_, relY_);
-
-        isTargetVisible_ = (px >= 30/*kMinPixels*/) || (tracking_ && distance_ < 1.0);
-        tracking_ = isTargetVisible_;
-        if (isTargetVisible_) {
-            lambda_ = saturatingLambda(distance_, 1.0, 10.0);
+        const bool seen = (px >= 30/*kMinPixels*/);
+        if (seen || tracking_) {
+            const auto wp  = sp.worldPosition(targetHandle_);
+            const auto rp  = sp.position();
+            const double yaw = sp.orientation()[2];
+            const double dx = wp[0] - rp[0], dy = wp[1] - rp[1];
+            relX_ =  std::cos(yaw) * dx + std::sin(yaw) * dy;
+            relY_ = -std::sin(yaw) * dx + std::cos(yaw) * dy;
+            distance_ = std::hypot(relX_, relY_);
         }
+
+        isTargetVisible_ = seen || (tracking_ && distance_ < 1.0);
+        tracking_ = isTargetVisible_;
+        if (isTargetVisible_)
+            lambda_ = saturatingLambda(distance_, 1.0, 10.0);
 
     } catch (const std::exception& e) {
         tracking_ = false;
@@ -1878,7 +2030,7 @@ bool ReachColor::isObjectInKnapsack(){
     }
 }
 std::pair<double, double> ReachColor::executeMotorSchema() { 
-    if (distance_ <= 0.55) return {0.0, 0.0};
+    if (distance_ <= kStopDist) return {0.0, 0.0};
 
     double angle = std::atan2(relY_, relX_);
 

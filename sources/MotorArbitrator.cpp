@@ -2,10 +2,9 @@
 #include "SharedPerception.h"
 #include <cmath>
 #include <iostream>
-#include <mutex>
 
 MotorArbitrator::MotorArbitrator(const std::string& name, const BT::NodeConfig& config)
-    : BT::ThreadedAction(name, config) {
+    : BT::ActionNodeBase(name, config) {
     auto& sp    = SharedPerception::get();
     leftMotor_  = sp.handle("/PioneerP3DX/leftMotor");
     rightMotor_ = sp.handle("/PioneerP3DX/rightMotor");
@@ -18,14 +17,15 @@ BT::PortsList MotorArbitrator::providedPorts() {
 }
 
 void MotorArbitrator::halt() {
-    SharedPerception::get().wake();
-    BT::ThreadedAction::halt();
+    previousWinner_ = "none";
+    prevVL_         = 1e9;
+    prevVR_         = 1e9;
+    resetStatus();
 }
 
 MotorArbitrator::ArbitratedOutput MotorArbitrator::resolveCommand() {
     ArbitratedOutput out;
 
-    std::lock_guard<std::mutex> lock(MotorCommand::lock());
     MotorCommand cmd;
     if (!getInput("Motor", cmd)) {
         return out;
@@ -58,15 +58,12 @@ MotorArbitrator::ArbitratedOutput MotorArbitrator::resolveCommand() {
     return out;
 }
 
-void MotorArbitrator::applyToSimulator(const ArbitratedOutput& out,
-                                       std::string& previousWinner,
-                                       double& prevVL,
-                                       double& prevVR) {
-    const bool stopping   = out.vL == 0.0 && out.vR == 0.0 && (prevVL != 0.0 || prevVR != 0.0);
+void MotorArbitrator::applyToSimulator(const ArbitratedOutput& out) {
+    const bool stopping   = out.vL == 0.0 && out.vR == 0.0 && (prevVL_ != 0.0 || prevVR_ != 0.0);
     const bool velChanged = stopping ||
-                            std::abs(out.vL - prevVL) > kVelEpsilon ||
-                            std::abs(out.vR - prevVR) > kVelEpsilon;
-    const bool winChanged = out.winner != previousWinner;
+                            std::abs(out.vL - prevVL_) > kVelEpsilon ||
+                            std::abs(out.vR - prevVR_) > kVelEpsilon;
+    const bool winChanged = out.winner != previousWinner_;
 
     if (!velChanged && !winChanged) {
         return;
@@ -78,38 +75,21 @@ void MotorArbitrator::applyToSimulator(const ArbitratedOutput& out,
                 s.sim().setJointTargetVelocity(leftMotor_,  out.vL / kWheelRadius);
                 s.sim().setJointTargetVelocity(rightMotor_, out.vR / kWheelRadius);
             }
-            if (winChanged)
+            if (winChanged) {
                 s.sim().setStringSignal("active_behavior", out.winner);
-            
+            }
         } catch (const std::exception& e) {
             std::cout << "[MotorArbitrator] error: " << e.what() << '\n';
         }
     });
 
-    prevVL         = out.vL;
-    prevVR         = out.vR;
-    previousWinner = out.winner;
+    prevVL_         = out.vL;
+    prevVR_         = out.vR;
+    previousWinner_ = out.winner;
 }
 
 BT::NodeStatus MotorArbitrator::tick() {
-    auto& sp = SharedPerception::get();
-    std::string previousWinner = "none";
-    double prevVL = 1e9;
-    double prevVR = 1e9;
-    uint64_t seen = 0;
-
-    while (!isHaltRequested()) {
-        if (!sp.waitNextTick(seen, [this] { return isHaltRequested(); }))
-            continue;
-        
-
-        sp.waitWorkersDone(/*kWorkersTimeout*/);
-
-        const ArbitratedOutput out = resolveCommand();
-        applyToSimulator(out, previousWinner, prevVL, prevVR);
-
-        sp.arbitratorDone();
-    }
-
-    return BT::NodeStatus::IDLE;
+    const ArbitratedOutput out = resolveCommand();
+    applyToSimulator(out);
+    return BT::NodeStatus::RUNNING;
 }

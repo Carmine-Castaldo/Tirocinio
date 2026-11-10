@@ -1,8 +1,8 @@
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <fstream>
 #include <iostream>
-#include <chrono>
 #include <string>
 #include <thread>
 #include <tuple>
@@ -24,11 +24,11 @@
 #include "RemoteAPIClient.h"
 #include "RemoteAPIObjects.h"
 
-const std::vector<std::string> G_CUBE_LIST = {"/GreenCube", "/RedCube", "/YellowCube", "/OrangeCube"};
+const std::vector<std::string> G_CUBE_LIST   = {"/GreenCube", "/RedCube", "/YellowCube", "/OrangeCube"};
 const std::vector<std::string> G_IGNORE_LIST = {"/PioneerP3DX", "/Bill"};
 const std::string G_ROBOT_NAME = "/PioneerP3DX";
-const std::string G_BILL_NAME = "/Bill";
-static uint64_t g_tickCount = 0;
+const std::string G_BILL_NAME  = "/Bill";
+static uint64_t g_tickCount    = 0;
 
 struct SimHandles {
     int64_t leftMotor  = -1;
@@ -40,11 +40,10 @@ struct SimHandles {
 SimHandles initSimulation(RemoteAPIObjects& sim);
 BT::Tree createBehaviorTree(BT::BehaviorTreeFactory& factory, RemoteAPIObjects& sim, const std::string& xmlPath);
 void setupEnvironmentAndBlackboard(RemoteAPIObjects& sim, const BT::Blackboard::Ptr& blackboard, unsigned seed, const std::string& outDir);
-std::pair<std::string, double> runSimulationLoop(RemoteAPIClient& client, RemoteAPIObjects& sim, BT::Tree& tree, 
+std::pair<std::string, double> runSimulationLoop(RemoteAPIClient& client, RemoteAPIObjects& sim, BT::Tree& tree,
                                                  const SimHandles& handles, double maxT);
 void logFailures(const BT::Tree& tree, const BT::TreeObserver& observer, const std::string& outDir, unsigned seed);
 void saveTrialSummary(const std::string& outDir, unsigned seed, const std::string& result, double simTime, double pathLen);
-
 
 int main(int argc, char** argv) {
     const unsigned seed   = (argc > 1) ? static_cast<unsigned>(std::stoul(argv[1])) : 1;
@@ -84,15 +83,13 @@ int main(int argc, char** argv) {
     return 0;
 }
 
-
-
 SimHandles initSimulation(RemoteAPIObjects& sim) {
     SimHandles h;
     h.leftMotor  = sim.sim().getObjectHandle((G_ROBOT_NAME + "/leftMotor").c_str());
     h.rightMotor = sim.sim().getObjectHandle((G_ROBOT_NAME + "/rightMotor").c_str());
     h.robot      = sim.sim().getObjectHandle(G_ROBOT_NAME.c_str());
     h.camera     = sim.sim().getObjectHandle((G_ROBOT_NAME + "/visionSensor").c_str());
-    
+
     SharedPerception::get().setup(&sim, h.robot, h.camera);
     return h;
 }
@@ -104,7 +101,7 @@ BT::Tree createBehaviorTree(BT::BehaviorTreeFactory& factory, RemoteAPIObjects& 
     factory.registerNodeType<Place>("Place", &sim);
     factory.registerNodeType<Wander>("Wander", &sim);
     factory.registerNodeType<MotorArbitrator>("MotorArbitrator");
-    
+
     return factory.createTreeFromFile(xmlPath);
 }
 
@@ -119,7 +116,7 @@ void setupEnvironmentAndBlackboard(RemoteAPIObjects& sim, const BT::Blackboard::
     }
 
     for (const auto& c : cubes) {
-        std::string cleanName = c.path.substr(1);         
+        std::string cleanName = c.path.substr(1);
         blackboard->set(cleanName + "_x", c.x);
         blackboard->set(cleanName + "_y", c.y);
     }
@@ -132,7 +129,7 @@ void setupEnvironmentAndBlackboard(RemoteAPIObjects& sim, const BT::Blackboard::
     blackboard->set("Motor", MotorCommand{});
 }
 
-std::pair<std::string, double> runSimulationLoop(RemoteAPIClient& client, RemoteAPIObjects& sim, BT::Tree& tree, 
+std::pair<std::string, double> runSimulationLoop(RemoteAPIClient& client, RemoteAPIObjects& sim, BT::Tree& tree,
                                                  const SimHandles& handles, double maxT) {
     std::string result = "TIMEOUT";
     double pathLen = 0.0, px = 0.0, py = 0.0;
@@ -141,45 +138,27 @@ std::pair<std::string, double> runSimulationLoop(RemoteAPIClient& client, Remote
     auto& sp = SharedPerception::get();
     double lastSimTime = -1.0;
 
-
-
-    tree.tickExactlyOnce();
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
-
     while (true) {
         const double simNow = sp.exec([](RemoteAPIObjects& s) { return s.sim().getSimulationTime(); });
         if (simNow <= lastSimTime) {
             std::this_thread::sleep_for(std::chrono::milliseconds(2));
             continue;
         }
-        using clk = std::chrono::steady_clock;
-        auto ms = [](clk::time_point a, clk::time_point b) {
-            return std::chrono::duration_cast<std::chrono::milliseconds>(b - a).count();
-        };
-
-        const auto t0 = clk::now();
-        const auto t1 = t0;
 
         lastSimTime = simNow;
         g_tickCount++;
 
+        std::cout << "=============TICK " << g_tickCount << " START=============" << std::endl;
         sp.newTick(simNow);
-        const auto t2 = clk::now();
-        sp.waitArbitratorDone();
-        const auto t3 = clk::now();
 
         BT::NodeStatus st = tree.tickExactlyOnce();
-        const auto t4 = clk::now();
+        std::cout << "=============TICK " << g_tickCount << " END=============" << std::endl;
 
-        std::cout << "[PROF] tick " << g_tickCount << " t=" << simNow
-                  << " | newTick=" << ms(t1, t2)
-                  << " waitArb=" << ms(t2, t3) << " treeTick=" << ms(t3, t4)
-                  << " TOTAL=" << ms(t0, t4) << " ms | " << sp.profileReport() << std::endl;
         const double t = sp.time();
         const auto pos = sp.position();
-        if (havePrev)
+        if (havePrev) {
             pathLen += std::hypot(pos[0] - px, pos[1] - py);
-
+        }
         px = pos[0];
         py = pos[1];
         havePrev = true;
@@ -202,7 +181,7 @@ void logFailures(const BT::Tree& tree, const BT::TreeObserver& observer, const s
             rows.emplace_back(ns.last_timestamp.count(), n->fullPath(), ns.failure_count);
         }
     });
-    
+
     std::sort(rows.rbegin(), rows.rend());
     std::ofstream f(outDir + "/failures_seed" + std::to_string(seed) + ".txt");
     for (size_t i = 0; i < rows.size() && i < 15; ++i) {
@@ -218,7 +197,7 @@ void saveTrialSummary(const std::string& outDir, unsigned seed, const std::strin
 
     if (!exists) s << "seed,result,sim_time_s,path_m\n";
     s << seed << ',' << result << ',' << simTime << ',' << pathLen << '\n';
-    
-    std::cout << "[TRIAL " << seed << "] " << result 
+
+    std::cout << "[TRIAL " << seed << "] " << result
               << " t=" << simTime << "s path=" << pathLen << "m\n";
 }

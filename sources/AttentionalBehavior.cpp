@@ -2,7 +2,7 @@
 #include <iostream>
 
 AttentionalBehavior::AttentionalBehavior(const std::string& name, const BT::NodeConfig& config)
-    : BT::ThreadedAction(name, config), sp(SharedPerception::get()) {}
+    : BT::ActionNodeBase(name, config), sp(SharedPerception::get()) {}
 
 BT::PortsList AttentionalBehavior::providedPorts() {
     return {
@@ -44,9 +44,9 @@ bool AttentionalBehavior::evaluateCycle(double now) {
         std::tie(lastVL_, lastVR_) = executeMotorSchema();
 
         if (isFinished()) {
-            if (accomplishesTask()) {
+            if (accomplishesTask())
                 taskAccomplished();
-            }
+            
             return true;
         }
     } else {
@@ -80,8 +80,7 @@ std::string AttentionalBehavior::getProposalID() const {
 
 void AttentionalBehavior::proposeCommand() {
     const std::string myID = getProposalID();
-    
-    std::lock_guard<std::mutex> lock(MotorCommand::lock());
+
     MotorCommand cmd;
     if (!getInput("Motor", cmd)) return;
 
@@ -106,7 +105,6 @@ void AttentionalBehavior::proposeCommand() {
 void AttentionalBehavior::withdrawCommand() {
     const std::string myID = getProposalID();
 
-    std::lock_guard<std::mutex> lock(MotorCommand::lock());
     MotorCommand cmd;
     if (!getInput("Motor", cmd)) return;
 
@@ -130,57 +128,34 @@ void AttentionalBehavior::withdrawCommand() {
 
 BT::NodeStatus AttentionalBehavior::tick() {
     const uint64_t key = UID();
-    sp.registerWorker();
+    const double now   = sp.time();
 
-    struct WorkerScopeGuard {
-        AttentionalBehavior* self;
-        SharedPerception& sp;
-        uint64_t key;
-        ~WorkerScopeGuard() {
-            self->withdrawCommand();
+    try {
+        if (now >= nextActivation_ && evaluateCycle(now)) {
+            withdrawCommand();
             sp.withdrawGoal(key);
-            sp.unregisterWorker();
-        }
-    } guard{this, sp, key};
-
-    uint64_t seen = 0;
-    resetState();
-
-    while (!isHaltRequested()) {
-        if (!sp.waitNextTick(seen, [this] { return isHaltRequested(); }))
-            continue;
-        
-        const double now = sp.time();
-
-        try {
-            if (now >= nextActivation_ && evaluateCycle(now)) {
-                withdrawCommand();
-                sp.workerDone();
-                return BT::NodeStatus::SUCCESS;
-            }
-
-            if (active_) {
-                proposeCommand();
-                afterPropose();
-            } else {
-                withdrawCommand();
-                sp.withdrawGoal(key);
-            }
-        } catch (const std::exception& e) {
-            std::cout << "[" << name() << "] " << e.what() << '\n';
+            resetState();
+            return BT::NodeStatus::SUCCESS;
         }
 
-        sp.workerDone();
+        if (active_) {
+            proposeCommand();
+            afterPropose();
+        } else {
+            withdrawCommand();
+            sp.withdrawGoal(key);
+        }
+    } catch (const std::exception& e) {
+        std::cout << "[" << name() << "] " << e.what() << '\n';
     }
 
-    return BT::NodeStatus::IDLE;
+    return BT::NodeStatus::RUNNING;
 }
 
 void AttentionalBehavior::halt() {
-    sp.wake();
-    BT::ThreadedAction::halt();
     withdrawCommand();
     sp.withdrawGoal(UID());
     resetState();
     accomplished_ = false;
+    resetStatus();
 }

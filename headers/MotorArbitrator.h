@@ -2,20 +2,22 @@
 #define MOTORARBITRATOR_H
 
 #include <behaviortree_cpp/action_node.h>
-#include <chrono>
 #include <cstdint>
 #include <string>
 
 #include "MotorCommand.h"
 
-class MotorArbitrator : public BT::ThreadedAction {
+class MotorArbitrator : public BT::ActionNodeBase {
 private:
     static constexpr double kWheelRadius = 0.0975;
-    static constexpr double kVelEpsilon  = 5e-3; 
-    static constexpr auto kWorkersTimeout = std::chrono::milliseconds(150);
+    static constexpr double kVelEpsilon  = 5e-3;
 
     int64_t leftMotor_  = -1;
     int64_t rightMotor_ = -1;
+
+    std::string previousWinner_ = "none";
+    double prevVL_              = 1e9;
+    double prevVR_              = 1e9;
 
     struct ArbitratedOutput {
         std::string winner = "none";
@@ -25,10 +27,7 @@ private:
     };
 
     ArbitratedOutput resolveCommand();
-    void applyToSimulator(const ArbitratedOutput& out,
-                          std::string& previousWinner,
-                          double& prevVL,
-                          double& prevVR);
+    void applyToSimulator(const ArbitratedOutput& out);
 
 public:
     MotorArbitrator(const std::string& name, const BT::NodeConfig& config);

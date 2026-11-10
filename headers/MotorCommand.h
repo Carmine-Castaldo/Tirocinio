@@ -3,9 +3,6 @@
 
 #include <string>
 #include <utility>
-#include <unordered_map>
-#include <memory>
-#include <mutex>
 
 struct MotorCommand {
     std::string owner = "";
@@ -17,7 +14,6 @@ struct MotorCommand {
     double avoidVR = 0.0;
     double avoidEmphasis = -1.0;
 
-    static std::mutex& lock() { static std::mutex m; return m; }
 };
 
 #endif // MOTOR_COMMAND_H

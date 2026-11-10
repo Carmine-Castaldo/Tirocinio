@@ -9,7 +9,7 @@
 #include "MotorCommand.h"
 #include "SharedPerception.h"
 
-class AttentionalBehavior : public BT::ThreadedAction {
+class AttentionalBehavior : public BT::ActionNodeBase {
 protected:
     static constexpr double kDefaultMu   = 1.0;
     static constexpr double kMuStep      = 1.0;
@@ -18,19 +18,18 @@ protected:
 
     SharedPerception& sp;
 
-    bool active_         = false;
-    bool accomplished_   = false;
-    double mu_           = kDefaultMu;
-    double lambda_       = 1.0;
-    double emphasis_     = 0.0;
+    bool active_           = false;
+    bool accomplished_     = false;
+    double mu_             = kDefaultMu;
+    double lambda_         = 1.0;
+    double emphasis_       = 0.0;
     double nextActivation_ = 0.0;
-    double lastVL_       = 0.0;
-    double lastVR_       = 0.0;
+    double lastVL_         = 0.0;
+    double lastVR_         = 0.0;
 
     virtual void afterPropose() {}
     virtual bool accomplishesTask() const { return false; }
     virtual bool exclusive() const { return true; }
-
 
     static double saturatingLambda(double s, double rmin, double rmax,
                                    double lmin = kMinLambda, double lmax = 1.0) {
@@ -39,11 +38,11 @@ protected:
         return lmin + (lmax - lmin) * (s - rmin) / (rmax - rmin);
     }
 
-
-    void resetState();
+    virtual void resetState();
     virtual bool isFinished() const {
         return name() != "avoid" && lastVL_ == 0.0 && lastVR_ == 0.0;
     }
+
     void updateEmphasis();
     bool evaluateCycle(double now);
     void taskAccomplished();

@@ -18,7 +18,6 @@ protected:
     SharedPerception& sp;
 
     bool active_         = false;
-    
     double mu_           = kDefaultMu;
     double lambda_       = 1.0;
     double emphasis_     = 0.0;

@@ -115,8 +115,8 @@ BT::NodeStatus AttentionalBehavior::tick() {
     resetState();
 
     while (!isHaltRequested()) {
-        if (!sp.waitNextTick(seen, [this] { return isHaltRequested(); }))
-            continue;
+        // if (!sp.waitNextTick(seen, [this] { return isHaltRequested(); }))
+        //     continue;
         
         const double now = sp.time();
 

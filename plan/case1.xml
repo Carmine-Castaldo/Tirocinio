@@ -63,14 +63,14 @@
 
 <BehaviorTree ID="FollowColor">
   <Parallel failure_count="1" success_count="1">
-    <AvoidObstacles name="avoid" Object="{Object}" Motor="{Motor}" />
+    <AvoidObstacles name="avoid" Object="{Object}" Motor="{Motor}" mu="{mu}" />
     <ReachColor name="ReachColor" Color="{Color}" Object="{Object}" knapsack="{knapsack}" Done="{Done}" mu="{mu}" Motor="{Motor}" _onSuccess="mu := mu + 1.0"/>
   </Parallel>
 </BehaviorTree>
 
 <BehaviorTree ID="ExploreXY">
   <Parallel failure_count="1" success_count="1">
-    <AvoidObstacles name="avoid" Object="{Object}" Motor="{Motor}" />
+    <AvoidObstacles name="avoid" Object="{Object}" Motor="{Motor}" mu="{mu}"/>
     <GoToXY name="GoToXY" X="{X}" Y="{Y}" Object="{Object}" Done="{Done}" mu="{mu}" Motor="{Motor}" />
     <Wander name="wander" Motor="{Motor}" />
   </Parallel>

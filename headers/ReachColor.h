@@ -33,6 +33,7 @@ public:
     void updatePerceptualSchema() override;
     void afterPropose() override { SharedPerception::get().offerGoal(UID(), targetHandle_, emphasis_); }
     std::pair<double, double> executeMotorSchema() override;
+    bool accomplishesTask() const override { return true; }
 };
 
 #endif // REACH_COLOR_H

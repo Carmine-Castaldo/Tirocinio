@@ -18,14 +18,14 @@ void AttentionalBehavior::resetState() {
     active_         = false;
 }
 
-void AttentionalBehavior::taskAccomplished() {
-    if (accomplished_) return;
-    accomplished_ = true;
+// void AttentionalBehavior::taskAccomplished() {
+//     if (accomplished_) return;
+//     accomplished_ = true;
 
-    double currentMu = kDefaultMu;
-    getInput("mu", currentMu);
-    setOutput("mu", currentMu + kMuStep);
-}
+//     double currentMu = kDefaultMu;
+//     getInput("mu", currentMu);
+//     setOutput("mu", currentMu + kMuStep);
+// }
 
 void AttentionalBehavior::updateEmphasis() {
     if (!getInput("mu", mu_)) mu_ = kDefaultMu;
@@ -44,9 +44,9 @@ bool AttentionalBehavior::evaluateCycle(double now) {
         std::tie(lastVL_, lastVR_) = executeMotorSchema();
 
         if (isFinished()) {
-            if (accomplishesTask()) {
-                taskAccomplished();
-            }
+            // if (accomplishesTask()) {
+            //     taskAccomplished();
+            // }
             return true;
         }
     } else {
@@ -182,5 +182,5 @@ void AttentionalBehavior::halt() {
     withdrawCommand();
     sp.withdrawGoal(UID());
     resetState();
-    accomplished_ = false;
+    //accomplished_ = false;
 }

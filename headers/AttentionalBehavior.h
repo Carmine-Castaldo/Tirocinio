@@ -12,14 +12,14 @@
 class AttentionalBehavior : public BT::ThreadedAction {
 protected:
     static constexpr double kDefaultMu   = 1.0;
-    static constexpr double kMuStep      = 1.0;
+    //static constexpr double kMuStep      = 1.0;
     static constexpr double kMinLambda   = 0.01;
     static constexpr double kMinEmphasis = 1e-3;
 
     SharedPerception& sp;
 
     bool active_         = false;
-    bool accomplished_   = false;
+    //bool accomplished_   = false;
     double mu_           = kDefaultMu;
     double lambda_       = 1.0;
     double emphasis_     = 0.0;
@@ -28,7 +28,7 @@ protected:
     double lastVR_       = 0.0;
 
     virtual void afterPropose() {}
-    virtual bool accomplishesTask() const { return false; }
+    //virtual bool accomplishesTask() const { return false; }
     virtual bool exclusive() const { return true; }
 
 
@@ -46,7 +46,7 @@ protected:
     }
     void updateEmphasis();
     bool evaluateCycle(double now);
-    void taskAccomplished();
+    //void taskAccomplished();
 
     std::string getProposalID() const;
     void proposeCommand();

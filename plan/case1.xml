@@ -64,7 +64,7 @@
 <BehaviorTree ID="FollowColor">
   <Parallel failure_count="1" success_count="1">
     <AvoidObstacles name="avoid" Object="{Object}" Motor="{Motor}" />
-    <ReachColor name="ReachColor" Color="{Color}" Object="{Object}" knapsack="{knapsack}" Done="{Done}" mu="{mu}" Motor="{Motor}"/>
+    <ReachColor name="ReachColor" Color="{Color}" Object="{Object}" knapsack="{knapsack}" Done="{Done}" mu="{mu}" Motor="{Motor}" _onSuccess="mu := mu + 1.0"/>
   </Parallel>
 </BehaviorTree>
 

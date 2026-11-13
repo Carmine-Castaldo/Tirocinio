@@ -55,7 +55,7 @@ void AvoidObstacles::updateTargetHandle() {
         targetHandle_ = -1;
         previousPath_ = currentPath;
         if (!currentPath.empty()) {
-            try { targetHandle_ = SharedPerception::get().handle(currentPath);}
+            try { targetHandle_ = SharedPerception::get().handle(currentPath); }
             catch (...) {}
         }
     }
@@ -81,8 +81,10 @@ void AvoidObstacles::updatePerceptualSchema() {
         holdUntil_ = now + kHoldSec;
         lastDistances_ = distances_;
         lastMinDist_ = minDistance;
-    } else if (now >= holdUntil_)
+    } else if (now >= holdUntil_) {
         turnSign_ = 0;
+        lastMinDist_ = 1.0;
+    }
     
     double effectiveDist = isObstacle_ ? minDistance : lastMinDist_;
     lambda_ = saturatingLambda(effectiveDist, 0.5, 1.0);
@@ -132,12 +134,10 @@ std::pair<double, double> AvoidObstacles::executeMotorSchema() {
     double linearVel = 0.175;
     double w_gain = 0.175;
 
-    if (minDist < 0.20) {
-        linearVel = 0.025;
-        w_gain = 0.275;
-    } else if (minDist < 0.40) 
-        linearVel = 0.09;
-
+    if (minDist < 0.20) linearVel = 0.025;
+    else if (minDist < 0.40) linearVel = 0.09;
+    
+    w_gain = (minDist < 0.35) ? 0.275 : 0.175;
     double w = std::clamp(turn * w_gain, -1.2, 1.2); 
     
     double v_left  = linearVel - (w * kWheelBase) / 2.0;

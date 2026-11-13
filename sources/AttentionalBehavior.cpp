@@ -18,14 +18,6 @@ void AttentionalBehavior::resetState() {
     active_         = false;
 }
 
-void AttentionalBehavior::taskAccomplished() {
-    if (accomplished_) return;
-    accomplished_ = true;
-
-    double currentMu = kDefaultMu;
-    getInput("mu", currentMu);
-    setOutput("mu", currentMu + kMuStep);
-}
 
 void AttentionalBehavior::updateEmphasis() {
     if (!getInput("mu", mu_)) mu_ = kDefaultMu;
@@ -42,13 +34,8 @@ bool AttentionalBehavior::evaluateCycle(double now) {
 
     if (active_) {
         std::tie(lastVL_, lastVR_) = executeMotorSchema();
-
-        if (isFinished()) {
-            if (accomplishesTask()) {
-                taskAccomplished();
-            }
+        if (isFinished())
             return true;
-        }
     } else {
         lastVL_ = 0.0;
         lastVR_ = 0.0;
@@ -63,14 +50,12 @@ std::string AttentionalBehavior::getUniqueID() const {
     getInput("Object", obj);
     getInput("Color", color);
     getInput("Target", place);
-
-    if (!exclusive()) 
-        return name() + "_" + (obj == "/Bill" ? obj : "");
-    
     std::string id = name();
+    
     if (!obj.empty())   id += "_" + obj;
     if (!color.empty()) id += "_" + color;
     if (!place.empty()) id += "_" + place;
+    
     return id;
 }
 
@@ -84,28 +69,14 @@ void AttentionalBehavior::proposeCommand(bool updated) {
     std::lock_guard<std::mutex> lock(MotorCommand::lock());
     MotorCommand cmd;
     if (!getInput("Motor", cmd)) return;
+    if (cmd.owner == myID && !updated) return;
 
-    if (exclusive()) {
-        if (cmd.owner == myID && !updated) return;
-
-        if (cmd.owner == myID || emphasis_ > cmd.emphasis) {
+    if (cmd.owner == myID || emphasis_ > cmd.emphasis) {
             cmd.owner    = myID;
             cmd.emphasis = emphasis_;
             cmd.command  = {lastVL_, lastVR_};
             setOutput("Motor", cmd);
             MotorCommand::nodeWritesTotal.fetch_add(1, std::memory_order_relaxed);
-        }
-    } else {
-        if (cmd.avoidOwner == myID && !updated) return;
-
-        if (cmd.avoidOwner == myID || emphasis_ > cmd.avoidEmphasis) {
-            cmd.avoidOwner    = myID;
-            cmd.avoidEmphasis = emphasis_;
-            cmd.avoidVL       = lastVL_;
-            cmd.avoidVR       = lastVR_;
-            setOutput("Motor", cmd);
-            MotorCommand::nodeWritesTotal.fetch_add(1, std::memory_order_relaxed);
-        }
     }
 }
 
@@ -116,22 +87,13 @@ void AttentionalBehavior::withdrawCommand() {
     MotorCommand cmd;
     if (!getInput("Motor", cmd)) return;
 
-    if (exclusive()) {
-        if (cmd.owner == myID) {
-            cmd.owner    = "";
-            cmd.emphasis = -1.0;
-            cmd.command  = {0.0, 0.0};
-            setOutput("Motor", cmd);
-        }
-    } else {
-        if (cmd.avoidOwner == myID) {
-            cmd.avoidOwner    = "";
-            cmd.avoidEmphasis = -1.0;
-            cmd.avoidVL       = 0.0;
-            cmd.avoidVR       = 0.0;
-            setOutput("Motor", cmd);
-        }
+    if (cmd.owner == myID) {
+        cmd.owner    = "";
+        cmd.emphasis = -1.0;
+        cmd.command  = {0.0, 0.0};
+        setOutput("Motor", cmd);
     }
+
 }
 
 BT::NodeStatus AttentionalBehavior::tick() {
@@ -191,5 +153,4 @@ void AttentionalBehavior::halt() {
     withdrawCommand();
     sp.withdrawGoal(UID());
     resetState();
-    accomplished_ = false;
 }

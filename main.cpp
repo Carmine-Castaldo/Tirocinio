@@ -29,6 +29,10 @@ const std::vector<std::string> G_IGNORE_LIST = {"/PioneerP3DX", "/Bill"};
 const std::string G_ROBOT_NAME = "/PioneerP3DX";
 const std::string G_BILL_NAME = "/Bill";
 static uint64_t g_tickCount = 0;
+using clk = std::chrono::steady_clock;
+inline long long ms(clk::time_point a, clk::time_point b) {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(b - a).count();
+}
 
 struct SimHandles {
     int64_t leftMotor  = -1;
@@ -152,39 +156,32 @@ std::pair<std::string, double> runSimulationLoop(RemoteAPIClient& client, Remote
             std::this_thread::sleep_for(std::chrono::milliseconds(2));
             continue;
         }
-        using clk = std::chrono::steady_clock;
-        auto ms = [](clk::time_point a, clk::time_point b) {
-            return std::chrono::duration_cast<std::chrono::milliseconds>(b - a).count();
-        };
-
-        const auto t0 = clk::now();
 
         lastSimTime = simNow;
         g_tickCount++;
 
-
         const uint64_t reads  = MotorCommand::arbReadsTotal.load(std::memory_order_relaxed);
         const uint64_t writes = MotorCommand::nodeWritesTotal.load(std::memory_order_relaxed);
         const double ratio    = (writes > 0) ? static_cast<double>(reads) / writes : 0.0;
-        std::cout << "[NYQUIST] Letture Arbitro: " << reads
-                << " | Scritture Nodi: " << writes
-                << " | Rapporto f_arb / f_write = " << ratio << "x\n";
-
+        std::cout << "[NYQUIST] Letture Arbitrator: " << reads
+        << " | Scritture Nodi " << writes
+        << " | Rapporto reads / writes = " << ratio << "\n";
+        
+        const auto t0 = clk::now();
         sp.newTick(simNow);
-        const auto t2 = clk::now();
-        //sp.waitArbitratorDone();
-        const auto t3 = clk::now();
-
+        
+        const auto t1 = clk::now();
         BT::NodeStatus st = tree.tickExactlyOnce();
-        const auto t4 = clk::now();
-        //sp.waitWorkersDone();
+        const auto t2 = clk::now();
+    
         std::this_thread::sleep_until(t0 + std::chrono::milliseconds(10));
-
+        std::cout << "Tick " << g_tickCount << " in " << ms(t1, t2) << " ms" << std::endl; 
 
         // std::cout << "[PROF] tick " << g_tickCount << " t=" << simNow
         //           << " | newTick=" << ms(t1, t2)
         //           << " waitArb=" << ms(t2, t3) << " treeTick=" << ms(t3, t4)
         //           << " TOTAL=" << ms(t0, t4) << " ms | " << sp.profileReport() << std::endl;
+
         const double t = sp.time();
         const auto pos = sp.position();
         if (havePrev)

@@ -12,14 +12,9 @@ struct MotorCommand {
     double emphasis = -1.0;
     std::pair<double, double> command = {0.0, 0.0};
 
-    std::string avoidOwner = "";
-    double avoidVL = 0.0;
-    double avoidVR = 0.0;
-    double avoidEmphasis = -1.0;
-
     static std::mutex& lock() { static std::mutex m; return m; }
 
-    // TO CONFIRM NYQUISIT-SHANNON THEOREM  
+    // TO TEST NYQUISIT-SHANNON THEOREM  
     static inline std::atomic<uint64_t> arbReadsTotal{0};
     static inline std::atomic<uint64_t> nodeWritesTotal{0};
     static inline std::atomic<uint64_t> winnerUpdatesTotal{0};

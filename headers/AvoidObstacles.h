@@ -45,7 +45,6 @@ public:
     void updatePerceptualSchema() override;
     std::pair<double, double> executeMotorSchema() override;
     
-    bool exclusive() const override { return false; } 
 };
 
 #endif // AVOID_OBSTACLES_H

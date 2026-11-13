@@ -12,14 +12,12 @@
 class AttentionalBehavior : public BT::ActionNodeBase {
 protected:
     static constexpr double kDefaultMu   = 1.0;
-    static constexpr double kMuStep      = 1.0;
     static constexpr double kMinLambda   = 0.01;
     static constexpr double kMinEmphasis = 1e-3;
 
     SharedPerception& sp;
 
     bool active_           = false;
-    bool accomplished_     = false;
     double mu_             = kDefaultMu;
     double lambda_         = 1.0;
     double emphasis_       = 0.0;
@@ -28,9 +26,7 @@ protected:
     double lastVR_         = 0.0;
 
     virtual void afterPropose() {}
-    virtual bool accomplishesTask() const { return false; }
-    virtual bool exclusive() const { return true; }
-
+    
     static double saturatingLambda(double s, double rmin, double rmax,
                                    double lmin = kMinLambda, double lmax = 1.0) {
         if (s <= rmin) return lmin;
@@ -48,7 +44,7 @@ protected:
     void taskAccomplished();
 
     std::string getProposalID() const;
-    void proposeCommand();
+    void proposeCommand(bool updated);
     void withdrawCommand();
 
 public:

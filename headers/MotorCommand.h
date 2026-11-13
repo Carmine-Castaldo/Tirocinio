@@ -9,11 +9,6 @@ struct MotorCommand {
     double emphasis = -1.0;
     std::pair<double, double> command = {0.0, 0.0};
 
-    std::string avoidOwner = "";
-    double avoidVL = 0.0;
-    double avoidVR = 0.0;
-    double avoidEmphasis = -1.0;
-
 };
 
 #endif // MOTOR_COMMAND_H

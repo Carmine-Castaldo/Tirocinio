@@ -8,37 +8,54 @@
 
 inline unsigned& trialSeed() { static unsigned s = 1; return s; }
 
-struct CubePose { std::string path; double x, y; };
+struct CubePose {
+    std::string path;
+    double x, y;
+};
 
-inline std::vector<CubePose> randomizeCubes(RemoteAPIObjects& sim, unsigned seed,
-                                            const std::vector<std::string>& cubePaths,
-                                            const std::vector<std::string>& keepOutPaths,
-                                            double half = 6.5,
-                                            double minCubeDist = 1.5,
-                                            double minKeepOut = 2.0)
+inline std::vector<CubePose> randomizeCubes(
+    RemoteAPIObjects& sim, unsigned seed,
+    const std::vector<std::string>& movablePaths, // Cubi + "/Bill"
+    const std::vector<std::string>& keepOutPaths, // Solo {"/PioneerP3DX"}
+    double half = 6.5, double minCubeDist = 1.5, double minKeepOut = 2.0) 
 {
     std::mt19937 rng(seed);
     std::uniform_real_distribution<double> U(-half, half);
 
     std::vector<std::pair<double, double>> keep;
     for (const auto& p : keepOutPaths) {
-        auto pos = sim.sim().getObjectPosition(sim.sim().getObjectHandle(p), -1);
+        auto pos = sim.sim().getObjectPosition(sim.sim().getObjectHandle(p.c_str()), -1);
         keep.emplace_back(pos[0], pos[1]);
     }
 
     std::vector<CubePose> placed;
-    for (const auto& path : cubePaths) {
-        int64_t h = sim.sim().getObjectHandle(path);
+    for (const auto& path : movablePaths) {
+        int64_t h = sim.sim().getObjectHandle(path.c_str());
         auto cur = sim.sim().getObjectPosition(h, -1);
         bool ok = false;
+
         for (int attempt = 0; attempt < 2000 && !ok; ++attempt) {
             const double x = U(rng), y = U(rng);
             ok = true;
-            for (const auto& k : keep)   if (std::hypot(x - k.first, y - k.second) < minKeepOut) ok = false;
-            for (const auto& c : placed) if (std::hypot(x - c.x, y - c.y) < minCubeDist)         ok = false;
+
+            for (const auto& k : keep) {
+                if (std::hypot(x - k.first, y - k.second) < minKeepOut) ok = false;
+            }
+            for (const auto& c : placed) {
+                if (std::hypot(x - c.x, y - c.y) < minCubeDist) ok = false;
+            }
+
             if (ok) {
                 placed.push_back({path, x, y});
-                sim.sim().setObjectPosition(h, -1, {x, y, cur[2]});
+                if (path != "/Bill") {
+                    sim.sim().setObjectParent(h, -1, true);
+                    sim.sim().setObjectInt32Param(h, sim.sim().shapeintparam_static, 0);
+                    sim.sim().setObjectInt32Param(h, sim.sim().shapeintparam_respondable, 1);
+                    sim.sim().resetDynamicObject(h);
+                    sim.sim().setObjectPosition(h, -1, {x, y, 0.05});
+                } else {
+                    sim.sim().setObjectPosition(h, -1, {x, y, cur[2]});
+                }
             }
         }
         if (!ok) throw std::runtime_error("randomizeCubes: nessuna posizione valida per " + path);

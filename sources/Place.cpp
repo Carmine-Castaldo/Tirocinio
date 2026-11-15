@@ -105,17 +105,18 @@ void Place::completeAction() {
         try {
             sp.exec([&](RemoteAPIObjects& s) {
                 s.sim().setObjectParent(targetHandle_, -1, true);
-                s.sim().setObjectPosition(targetHandle_, -1, groundPos);
-                s.sim().setObjectInt32Param(targetHandle_, s.sim().shapeintparam_static, 0);
-                s.sim().setObjectInt32Param(targetHandle_, s.sim().shapeintparam_respondable, 1);
+                s.sim().setObjectInt32Param(targetHandle_, s.sim().shapeintparam_static, 1);
+                s.sim().setObjectInt32Param(targetHandle_, s.sim().shapeintparam_respondable, 0);
                 s.sim().resetDynamicObject(targetHandle_);
+                s.sim().setObjectPosition(targetHandle_, -1, {0.0, 0.0, -5.0});
             });
 
             auto it = std::find(knapsack_.begin(), knapsack_.end(), static_cast<int>(targetHandle_));
-            if (it != knapsack_.end())
+            if (it != knapsack_.end()) {
                 knapsack_.erase(it);
-            
-            setOutput("Done", false);
+            }
+
+            setOutput("Done", true);
             setOutput("knapsack", knapsack_);
         } catch (...) {}
     }

@@ -42,9 +42,11 @@
   </BehaviorTree>
 
   <BehaviorTree ID="Take">
-    <Parallel failure_count="1" success_count="2">
-      <SubTree ID="GoToColor" _autoremap="true"/>
-      <SubTree ID="PickUp"    _autoremap="true"/>
+    <Parallel failure_count="2" success_count="1">
+      <ForceFailure>
+        <SubTree ID="GoToColor" _autoremap="true"/>
+      </ForceFailure>
+      <SubTree ID="PickUp" _autoremap="true"/>
     </Parallel>
   </BehaviorTree>
 
@@ -80,22 +82,24 @@
     <Sequence>
       <Place Object="{Object}" Color="{Color}" Target="knapsack" knapsack="{knapsack}" 
             Done="{Done}" mu="{mu}" Motor="{Motor}"
-            _onSuccess="Done := true;" />  
+            _onSuccess="Done := true; mu := mu + 1.0" />  
     </Sequence>
   </BehaviorTree>
 
   <BehaviorTree ID="Return">
-    <Parallel failure_count="1" success_count="2">
-      <SubTree ID="GoToObject" Object="/Bill" _autoremap="true"/>
-      <SubTree ID="PutDown"    _autoremap="true"/>
+    <Parallel failure_count="2" success_count="1">
+      <ForceFailure>
+        <SubTree ID="GoToObject" Object="/Bill" _autoremap="true"/>
+      </ForceFailure>
+      <SubTree ID="PutDown" _autoremap="true"/>
     </Parallel>
   </BehaviorTree>
-
+  
   <BehaviorTree ID="PutDown">
     <Sequence>
       <Place Object="{Object}" Color="{Color}" Target="ground" knapsack="{knapsack}" 
             Done="{Placed}" mu="{mu}" Motor="{Motor}"
-            _onSuccess="Placed := true; mu := mu + 1.0" />
+            _onSuccess="Placed := true;" />
     </Sequence>
   </BehaviorTree>
 

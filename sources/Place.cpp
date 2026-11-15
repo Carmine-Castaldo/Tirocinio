@@ -1,7 +1,8 @@
 #include "Place.h"
 #include "SharedPerception.h"
+#include "TrialSetup.h"
 #include <algorithm>
-
+#include <fstream>
 Place::Place(const std::string& name, const BT::NodeConfig& config, RemoteAPIObjects* sim)
     : AttentionalBehavior(name, config), sim_(sim) {}
 
@@ -120,6 +121,9 @@ void Place::completeAction() {
             setOutput("knapsack", knapsack_);
         } catch (...) {}
     }
+
+    std::ofstream ev("events_current.csv", std::ios::app);
+    ev << sp.time() << "," << (target_ == "knapsack" ? "TAKE" : "RETURN") << "," << objectPath_ << "\n";
 }
 
 void Place::afterPropose(){

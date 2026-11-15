@@ -1,0 +1,3 @@
+/home/cc/universita/Triennale/Tirocinio/progetto/build_st/CMakeFiles/test_connection.dir
+/home/cc/universita/Triennale/Tirocinio/progetto/build_st/CMakeFiles/edit_cache.dir
+/home/cc/universita/Triennale/Tirocinio/progetto/build_st/CMakeFiles/rebuild_cache.dir
